@@ -5,6 +5,7 @@ import gc
 import gzip
 import json
 import math
+import platform
 import resource
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -22,6 +23,7 @@ from app.shortest_path.search import PathMetric, RoadPath, all_reachable_targets
 GEOD = Geod(ellps="WGS84")
 SNAP_GRID_DEGREES = 0.02
 SNAP_WARNING_DISTANCE_M = 10_000.0
+MATRIX_ALGORITHM_VERSION = "dijkstra-directed-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,7 +267,7 @@ def matrix_cache_key(
             for snap in snaps
         ],
         "speed_profile": speed_profile,
-        "algorithm": "dijkstra-directed-v1",
+        "algorithm": MATRIX_ALGORITHM_VERSION,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return sha256(encoded).hexdigest()
@@ -491,11 +493,17 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
                     "graph_sha256": actual_graph_sha256,
                     "seat_catalog_sha256": seat_catalog_sha256,
                     "methodology": {
+                        "algorithm": "Dijkstra",
+                        "algorithm_version": MATRIX_ALGORITHM_VERSION,
                         "seat_sampling": (
                             "Equally spaced indices in ascending IBGE code order; "
                             "not spatially balanced."
                         ),
                         "repetitions_per_size": 1,
+                    },
+                    "runtime_environment": {
+                        "python_version": platform.python_version(),
+                        "platform": platform.platform(),
                     },
                     "benchmarks": benchmark_results,
                     "process_peak_rss_note": (
