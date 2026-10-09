@@ -1,0 +1,32 @@
+# Python
+.venv/
+venv/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.mypy_cache/
+backend/.coverage
+backend/htmlcov/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Local settings and generated datasets
+.env
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/matrices/*
+!data/matrices/.gitkeep
+experiments/results/*
+!experiments/results/.gitkeep
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

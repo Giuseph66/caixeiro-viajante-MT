@@ -1,0 +1,41 @@
+{
+  "dataset": "Mato Grosso municipalities and municipal seats",
+  "created_at_utc": "2026-10-09T01:35:35.282083+00:00",
+  "municipality_catalog": {
+    "source_url": "https://servicodados.ibge.gov.br/api/v1/localidades/estados/51/municipios",
+    "snapshot_path": "data/raw/ibge/municipios-mt.json",
+    "snapshot_bytes": 64818,
+    "sha256": "6a5506b41f96b2aa1dbab29a85c235d8550dfef95a484d37605db23a9645a9e4",
+    "record_count": 142
+  },
+  "municipal_seats": {
+    "source_url": "https://geoftp.ibge.gov.br/organizacao_do_territorio/estrutura_territorial/localidades/Localidades_do_Brasil/2022/Localidades_UFs_shp.zip",
+    "source_product": "Censo Demográfico 2022 - Localidades do Brasil",
+    "source_path": "data/raw/ibge/Localidades_UFs_shp.zip",
+    "source_bytes": 4538286,
+    "source_file_last_modified_utc": "2025-11-19T19:15:51Z",
+    "source_sha256": "f4af7774f1bf92636c8ff2bde61b515b8dd65b3d50eca66664f3ce77a0b7470c",
+    "category": "Cidade",
+    "subcategory": "Sede Municipal",
+    "source_crs": "EPSG:4674",
+    "output_crs": "EPSG:4326",
+    "output_path": "data/processed/municipalities-mt.geojson",
+    "output_sha256": "3618fde6f0bdbd96fb568fe8db7e2506ffa0bab0516ecb0de8b9ad869e9fabfa"
+  },
+  "quality_report_path": "data/processed/municipality-quality.json",
+  "quality": {
+    "municipality_count": 142,
+    "seat_feature_count": 142,
+    "unique_municipality_codes": 142,
+    "missing_municipality_codes": [],
+    "duplicate_municipality_codes": [],
+    "municipality_name_mismatches": [],
+    "locality_code_mismatches": [],
+    "invalid_coordinates": [],
+    "source_crs": "EPSG:4674",
+    "output_crs": "EPSG:4326",
+    "max_source_attribute_coordinate_delta_degrees": 5.000000000165983e-05,
+    "coordinate_source": "shapefile point geometry; DBF coordinate columns are rounded"
+  },
+  "license_note": "IBGE source page lists these public files; no separate open-data license was stated on the download index. Preserve source attribution."
+}

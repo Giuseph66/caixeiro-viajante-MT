@@ -1,0 +1,10 @@
+{
+  "dataset": "IBGE state boundary for Mato Grosso",
+  "source_url": "https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2022/UFs/MT/MT_UF_2022.zip",
+  "source_product": "Malha Municipal Digital 2022, unidade da federação MT",
+  "source_path": "data/raw/ibge/MT_UF_2022.zip",
+  "file_bytes": 312666,
+  "sha256": "310d2ea614b51c21335241af21f3b919848a2e807389704877e208a15b054d7e",
+  "source_crs": "EPSG:4674",
+  "license_note": "Public IBGE source file; the download index does not state a separate license."
+}
