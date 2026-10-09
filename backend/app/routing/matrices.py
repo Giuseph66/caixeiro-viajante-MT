@@ -303,6 +303,24 @@ def _write_matrix_cache(
     temporary.replace(path)
 
 
+def _validate_manifested_cache_digest(
+    cache_path: Path,
+    *,
+    cache_key: str,
+    manifest_path: Path,
+) -> None:
+    if not manifest_path.exists():
+        return
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("Manifesto do cache imutável possui formato inválido")
+    if manifest.get("cache_key") != cache_key:
+        return
+    expected_sha256 = manifest.get("cache_sha256")
+    if not isinstance(expected_sha256, str) or file_sha256(cache_path) != expected_sha256:
+        raise ValueError("Cache imutável diverge do SHA-256 registrado no manifesto")
+
+
 def _validate_matrix_cache(
     payload: dict[str, Any],
     *,
@@ -433,6 +451,7 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
     speed_profile = graph_manifest["quality"]["speed_defaults_kph"]
     cache_key = matrix_cache_key(actual_graph_sha256, snaps, speed_profile)
     cache_path = PROJECT_ROOT / f"data/matrices/{cache_key}.json.gz"
+    cache_manifest_path = PROJECT_ROOT / "data/manifests/travel-matrix-mt.json"
     started_at = perf_counter()
 
     benchmark_results: list[dict[str, object]] = []
@@ -475,6 +494,11 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
             del distance, travel_time
             gc.collect()
         if cache_path.exists():
+            _validate_manifested_cache_digest(
+                cache_path,
+                cache_key=cache_key,
+                manifest_path=cache_manifest_path,
+            )
             with gzip.open(cache_path, "rt", encoding="utf-8") as source:
                 existing_cache = json.load(source)
             _validate_matrix_cache(
@@ -517,6 +541,11 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
             encoding="utf-8",
         )
     elif cache_path.exists():
+        _validate_manifested_cache_digest(
+            cache_path,
+            cache_key=cache_key,
+            manifest_path=cache_manifest_path,
+        )
         with gzip.open(cache_path, "rt", encoding="utf-8") as source:
             cached = json.load(source)
         distance_unreachable, time_unreachable = _validate_matrix_cache(
@@ -582,8 +611,10 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
             "data/processed/matrix-benchmarks-mt.json" if benchmark else None
         ),
     }
-    manifest_path = PROJECT_ROOT / "data/manifests/travel-matrix-mt.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    cache_manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return manifest
 
 

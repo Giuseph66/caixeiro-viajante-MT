@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import json
+from hashlib import sha256
+from pathlib import Path
+
+import pytest
+
 from app.graph.network import RoadEdge, RoadNetwork, RoadNode
 from app.routing.matrices import (
     SeatSnap,
+    _validate_manifested_cache_digest,
     build_metric_matrix,
     matrix_cache_key,
     snap_seats,
@@ -55,6 +62,30 @@ def test_cache_key_changes_with_graph_and_snap_assignment() -> None:
 
     assert first != changed_graph
     assert first != changed_snap
+
+
+def test_cache_manifest_rejects_changed_cache_bytes(tmp_path: Path) -> None:
+    cache_path = tmp_path / "matrix.json.gz"
+    manifest_path = tmp_path / "travel-matrix.json"
+    original_bytes = b"immutable matrix cache"
+    cache_path.write_bytes(original_bytes)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "cache_key": "matrix-key",
+                "cache_sha256": sha256(original_bytes).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache_path.write_bytes(b"changed matrix cache")
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        _validate_manifested_cache_digest(
+            cache_path,
+            cache_key="matrix-key",
+            manifest_path=manifest_path,
+        )
 
 
 def test_142_synthetic_seats_snap_to_nearest_network_node() -> None:
