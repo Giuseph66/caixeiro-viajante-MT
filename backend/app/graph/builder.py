@@ -16,7 +16,7 @@ from zipfile import ZipFile
 
 import osmium
 import shapefile
-from pyproj import CRS, Geod, Transformer
+from pyproj import CRS, Geod, Transformer, proj_version_str
 
 from app.graph.network import RoadEdge, RoadNetwork, RoadNode, TurnRestriction
 
@@ -439,6 +439,11 @@ def build_road_network(
     pbf_hash = file_sha256(pbf_path)
     if expected_pbf_sha256 and pbf_hash != expected_pbf_sha256:
         raise ValueError("SHA-256 do PBF diverge do manifesto D2")
+    runtime_versions = {
+        "pyosmium": version("osmium"),
+        "pyproj": version("pyproj"),
+        "proj": proj_version_str,
+    }
     handler = _RegionalGraphHandler(bounds)
     processed_dir = PROJECT_ROOT / "data/processed"
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -464,13 +469,15 @@ def build_road_network(
             "boundary_padding_m": BOUNDARY_PADDING_M,
             "boundary_crs": "EPSG:4674",
             "working_crs": "EPSG:5880",
+            "runtime_versions": runtime_versions,
         },
     )
     if not network.nodes or not network.edges:
         raise ValueError("O PBF não produziu segmentos automotivos dentro do recorte")
     report: dict[str, object] = {
         "parser": "PyOsmium",
-        "parser_version": version("osmium"),
+        "parser_version": runtime_versions["pyosmium"],
+        "runtime_versions": runtime_versions,
         "road_profile_version": ROAD_PROFILE_VERSION,
         "elapsed_seconds": elapsed_seconds,
         "peak_rss_mib": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 2),
