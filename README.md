@@ -32,6 +32,8 @@ Com os manifestos D3–D6 presentes, registre primeiro o orçamento e então exe
 
 O primeiro comando apenas estima CPU, RAM, duração, disco e hash da configuração. O runner aplica teto de RAM de 25 GB e grava checkpoints e relatórios por repetição em `experiments/results/`; a análise grava métricas e estatísticas em `experiments/analysis/`. Consulte o [protocolo experimental](docs/EXPERIMENTAL_PROTOCOL.md) e o [orçamento D9](experiments/analysis/d9-budget-mt-2026-10-10.md).
 
+O lote D9 de 2026-10-10 terminou com 10/10 repetições: 280 observações principais (220 `feasible`, 60 `not_found`), 80/80 resultados D5 viáveis e 400 observações de sensibilidade P2. Os `not_found` são todos P3 sem solução no conjunto de candidatas e não provam inviabilidade da rede. O [relatório D9](experiments/analysis/d9-mato-grosso-2026-10-10/report.md) e seus CSVs guardam os resultados. A unidade de cálculo teve teto rígido de 25.000.000.000 bytes, pico de 15,6 GiB e nenhum evento OOM.
+
 ## Iniciar
 
 Backend:

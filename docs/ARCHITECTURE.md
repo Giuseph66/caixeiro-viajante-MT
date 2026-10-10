@@ -1,6 +1,6 @@
 # Arquitetura do sistema
 
-**Estado:** D1–D8 implementadas; lote e análise D9 em execução. Grafo, caminhos e matrizes usam `backend/app/graph/`, `backend/app/shortest_path/` e `backend/app/routing/matrices.py`; a rede real e as matrizes têm manifestos congelados.
+**Estado:** D1–D10 concluídas; o lote D9 e sua análise estão completos. Grafo, caminhos e matrizes usam `backend/app/graph/`, `backend/app/shortest_path/` e `backend/app/routing/matrices.py`; a rede real e as matrizes têm manifestos congelados.
 
 ## Componentes
 

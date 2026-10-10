@@ -1,6 +1,6 @@
 # Protocolo experimental
 
-**Estado:** configuração D9 congelada; orçamento registrado antes do lote; dez repetições iniciadas em 2026-10-10; análise pendente.
+**Estado:** configuração D9 congelada; orçamento registrado antes do lote; dez repetições e análise concluídas em 2026-10-10. Resultados: [relatório D9](../experiments/analysis/d9-mato-grosso-2026-10-10/report.md).
 **Regra:** conferir orçamento, RAM disponível e disco livre imediatamente antes do lote.
 
 ## Perguntas

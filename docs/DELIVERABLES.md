@@ -97,7 +97,17 @@ Build TypeScript/Vite aprovado. A tela principal carrega o mapa sob demanda, man
 
 Configuração D9 congelada em `experiments/configurations/d9-mt.json`: 28 cenários estruturais × 10 repetições, seeds próprias por estágio, limites de 300 s por cenário D4/D5 e 60 s por variante D6. O orçamento foi registrado antes da execução em `experiments/analysis/d9-budget-mt-2026-10-10.md`: até 8 CPUs, estimativa de 6,84 h com margem de 20%, reserva de 2 GB e `MemoryMax=25.000.000.000` bytes. Os hashes do grafo e das matrizes conferem com o snapshot configurado.
 
-O lote foi iniciado em 2026-10-10 na unidade `d9-mt-20261010.service`, com oito CPUs e o teto de RAM aplicado ao processo e aos workers. Os relatórios ficam compactados por repetição e podem ser retomados. A análise estatística e os resultados observados serão registrados quando as dez repetições terminarem; `not_found` segue sem significar prova de inviabilidade global.
+O lote foi executado em `d9-mt-20261010.service`, com até oito CPUs e teto de RAM aplicado ao processo e a todos os workers. As dez repetições terminaram em 6 h 24 min (19 h 37 min de CPU). O cgroup registrou pico de 15,6 GiB sob `MemoryMax=25.000.000.000` bytes; `oom_kill=0` e `NRestarts=0`.
+
+As dez repetições geraram 280 observações principais: 220 `feasible` e 60 `not_found`. As 60 ocorrências são seis configurações P3 sem combinação no conjunto de candidatas; não provam inviabilidade da rede. D4 teve 40/40 observações viáveis. D5 teve 80/80 viáveis, cobrindo os oito cenários em dez repetições. A sensibilidade P2 contém 400 observações (oito cenários × cinco valores de λ × dez repetições).
+
+Em P3, duas das oito configurações de distribuição tiveram combinação sem arestas físicas compartilhadas; nas outras seis, a busca não encontrou combinação dentro das candidatas e do limite de tempo. Em P2, λ=1 reduziu a sobreposição mediana de 186,0 para 164,1 km em O2/k=2/tempo, com aumento do objetivo composto de 320.342 para 331.039 s; em O2/k=3/tempo, caiu de 897,4 para 857,0 km, enquanto o objetivo composto subiu de 220.778 para 273.868 s. Isso descreve o conjunto avaliado e não prova ótimo global.
+
+O relatório completo, `summary.json` e CSVs estão em `experiments/analysis/d9-mato-grosso-2026-10-10/`. O índice e o snapshot registram seeds, hashes dos artefatos e procedência dos commits: cálculo `39f20556b8bd956932c63f77220085f66d1b721a`, análise `cb5a8d75937c50857942bfb6148cb3a54d3958ef`, HEAD inicial `dfb1d49fd0ae6389bb2a6a1633aca7f9719143ab`. O snapshot também registra que o worktree estava marcado como dirty no início; a nota identifica o commit de cálculo como fonte do código D4–D6/configuração. Os arquivos gzip detalhados por repetição ficam no diretório local ignorado `experiments/results/`; podem ser regenerados pelos comandos em [Reproduzir a D9](../README.md#reproduzir-a-d9).
+
+## Estado final da D10 em 2026-10-10
+
+D10.1–D10.2 concluídas: README e instalação nativa descrevem ambiente, execução, limite de RAM e reprodução; arquitetura, modelo, decisões e protocolo registram dados, formulação, algoritmos e limitações. O relatório D9 contém estatísticas por cenário, D5 separado, sensibilidade P2, hashes e status. A velocidade é modelada, não tráfego observado; resultados de 142 sedes são heurísticos; `not_found` e busca exaustiva no pool não equivalem a prova sobre toda a rede.
 
 ## Portões de aceite
 
@@ -109,4 +119,4 @@ O lote foi iniciado em 2026-10-10 na unidade `d9-mt-20261010.service`, com oito 
 - D9: orçamento apresentado antes de experimentos caros.
 - D10: separar medição, hipótese, heurística e prova.
 
-Os testes das entregas D1–D8 foram executados e registrados nas respectivas seções. A D9 aguarda término e análise do lote; a síntese final D10 aguarda os resultados observados.
+Os testes das entregas D1–D8 foram executados e registrados nas respectivas seções. D9 terminou com 10/10 repetições e D10 registra método, resultados, procedência e limites científicos.

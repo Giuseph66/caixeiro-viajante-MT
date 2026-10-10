@@ -1,6 +1,6 @@
 # Plano do projeto
 
-**Estado:** Entregas 0, 1 e 2 concluídas; implementação D3 em andamento. A geração do grafo/matrizes aguarda confirmação explícita para comandos longos.
+**Estado:** Entregas D0–D10 concluídas. D9 executada em dez repetições com teto rígido de 25 GB; resultados e limitações estão registrados em `docs/DELIVERABLES.md` e no relatório D9.
 **Data:** 2026-10-08. **Diagnóstico D0:** nenhum código, pacote ou dado rodoviário existia antes da implementação.
 
 ## Diagnóstico
@@ -71,26 +71,26 @@ Processamento em etapas parece viável, mas tamanho do grafo em memória e tempo
 | R6 | P3 inviável em gargalos/origem comum | Revalidar arestas e distinguir “não encontrado” de “inviável comprovado” |
 | R7 | Tempo é estimado, não tráfego observado | Perfil e imputação de velocidade versionados; limitar interpretação |
 | R8 | OSM muda e usa ODbL | Congelar versão/hash/data; atribuição e licença documentadas |
-| R9 | Memória/tempo do grafo regional e matrizes ainda desconhecidos | Índice de localizações PyOsmium usa arquivo temporário esparso em disco; grafo em memória fica no envelope IBGE + 100 km; medir RSS/tempo antes dos benchmarks |
-| R10 | O2 até 142 origens × 28 cenários × 10 repetições pode custar caro | Benchmarks e orçamento antes da D9; limites registrados |
+| R9 | Memória/tempo do grafo regional e matrizes | Mitigado e medido: o índice PyOsmium usa arquivo temporário esparso; D3 mediu o grafo/matrizes; D9 rodou sob `MemoryMax=25.000.000.000` bytes e teve pico de 15,6 GiB |
+| R10 | O2 até 142 origens × 28 cenários × 10 repetições pode custar caro | Medido na D9: 10 repetições completas em 6 h 24 min; orçamento e limites registrados |
 
 ## Fases
 
-| Entrega | Resultado | Dependência |
+| Entrega | Resultado | Estado |
 |---|---|---|
 | 0 — Diagnóstico e planejamento | Seis docs de planejamento, riscos e tarefas | Concluída |
 | 1 — Estrutura e ambiente | Projeto nativo, locks, API de saúde, frontend mínimo e migração inicial | Concluída |
 | 2 — Municípios e dados | Snapshot IBGE, 142 sedes oficiais, PBF nacional com hash/licença e relatório de qualidade | Concluída |
-| 3 — Grafo e caminhos | Grafo dirigido, A*/Dijkstra, matrizes e cache | 2 |
-| 4 — Open TSP | Um agente, origem fixa/otimizada, rota aberta | 3 |
-| 5 — Open mTSP/VRP | Dois/três agentes, cobertura e objetivos A/B | 4 |
-| 6 — Sobreposição | P1/P2/P3, validação física e status de prova | 5 |
-| 7 — API e persistência | Experimentos e resultados consultáveis | 6 |
-| 8 — Interface | Mapa e comparação integrados a resultados reais | 7 |
-| 9 — Execução científica | Orçamento, cenários, métricas e análise | 6; API opcional |
-| 10 — Documentação final | Instalação, metodologia e reprodução | 1–9 |
+| 3 — Grafo e caminhos | Grafo dirigido, A*/Dijkstra, matrizes e cache | Concluída |
+| 4 — Open TSP | Um agente, origem fixa/otimizada, rota aberta | Concluída |
+| 5 — Open mTSP/VRP | Dois/três agentes, cobertura e objetivos A/B | Concluída |
+| 6 — Sobreposição | P1/P2/P3, validação física e status de prova | Concluída |
+| 7 — API e persistência | Experimentos e resultados consultáveis | Concluída |
+| 8 — Interface | Mapa e comparação integrados a resultados reais | Concluída |
+| 9 — Execução científica | Orçamento, cenários, métricas e análise | Concluída; relatório e CSVs disponíveis |
+| 10 — Documentação final | Instalação, metodologia e reprodução | Concluída |
 
-Mostrar cada entrega e aguardar aprovação antes da próxima. A interface atual é apenas um scaffold; grafo real, matrizes e rotas ainda não foram gerados. D3.1–D3.4 têm código inicial; testes e processamento PBF/matrizes aguardam confirmação conforme AGENTS.md.
+Todas as entregas foram concluídas conforme os critérios registrados. Os resultados D9 distinguem soluções viáveis de `not_found` no conjunto heurístico; não afirmam ótimo global nem inviabilidade global de P3.
 
 ## Registro da Entrega 1
 

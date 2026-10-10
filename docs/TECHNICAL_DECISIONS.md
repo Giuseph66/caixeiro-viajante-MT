@@ -1,6 +1,6 @@
 # Decisões técnicas
 
-**Data:** 2026-10-10. **Estado:** D0–D8 implementadas e verificadas; D9 configurada, orçada e em execução.
+**Data:** 2026-10-10. **Estado:** D0–D10 concluídas; D9 executada e analisada em dez repetições.
 
 | ID | Decisão | Estado | Justificativa / condição |
 |---|---|---|---|
@@ -28,12 +28,12 @@
 | TD-22 | Conversões automotivas via nó suportadas; via-ways/condicionais registradas como não suportadas | Implementada no código D3; sem validação executada | Evita apresentar cobertura parcial de restrições como cobertura total |
 | TD-23 | Tempo: maxspeed numérico; sem isso, velocidade por classe configurada | Provisória | Estimativa modelada; limitações ficam no manifesto; não representa tráfego observado |
 | TD-24 | Índice temporário sparse_file_array do PyOsmium durante o parse nacional | Implementada no código D3; sem medição | Mantém localizações fora do grafo em disco e limita cópia de todos os nós na RAM; custo de I/O será medido |
-| TD-25 | Teto rígido de 25 GB em unidade `systemd-run` própria | Aplicado antes de carregar dados em D2–D6 | `MemoryMax=25.000.000.000`; não usa o cgroup compartilhado do editor; falha fechada se o teto não puder ser aplicado. A medição D3 histórica de 25.288 MiB é anterior à proteção |
+| TD-25 | Teto rígido de 25 GB em unidade `systemd-run` própria | Aplicado antes de carregar dados em D2–D6 e D9 | `MemoryMax=25.000.000.000`; não usa o cgroup compartilhado do editor; falha fechada se o teto não puder ser aplicado. D9 completou em 6 h 24 min com pico de 15,6 GiB e zero eventos OOM. A medição D3 histórica de 25.288 MiB é anterior à proteção |
 | TD-26 | P2/P3 por enumeração de rotas candidatas com validação física final | Implementada e medida em D6 | Busca exaustiva é ótima apenas no conjunto enumerado; `not_found` em rede real não comprova inviabilidade global; pico D6 de 15.259.635.712 bytes |
 | TD-27 | Persistência de execuções em PostgreSQL/SQLAlchemy; ativos geográficos ficam em arquivos locais | Implementada em D7 | Manifestos guardam hashes, configuração, seed, ambiente e referências aos resultados; migração Alembic reversível |
 | TD-28 | Worker local serial para jobs de otimização | Implementada em D7 | API permanece responsiva; estado, progresso, logs, falha, cancelamento e recuperação são persistidos |
 | TD-29 | MapLibre exibe GeoJSON dos IDs e coordenadas reais das arestas | Implementada em D8 | Sem linhas retas entre cidades ou tiles remotos; comparação usa camada separada e métricas exportáveis |
-| TD-30 | D9 usa 28 configurações, dez repetições e seeds derivadas por estágio | Em execução | Orçamento prévio, até oito workers, limites D4/D5/D6 congelados e sensibilidade λ reusando o conjunto de candidatas |
+| TD-30 | D9 usa 28 configurações, dez repetições e seeds derivadas por estágio | Concluída e analisada | Orçamento prévio; até oito workers; limites D4/D5/D6 congelados; sensibilidade λ reusando candidatas; 10/10 repetições e artefatos em `experiments/analysis/d9-mato-grosso-2026-10-10/` |
 
 ## P2
 

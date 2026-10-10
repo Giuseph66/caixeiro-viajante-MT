@@ -1,0 +1,8 @@
+{
+  "calculation_code_commit": "39f20556b8bd956932c63f77220085f66d1b721a",
+  "analysis_code_commit": "cb5a8d75937c50857942bfb6148cb3a54d3958ef",
+  "index_git_revision": "dfb1d49fd0ae6389bb2a6a1633aca7f9719143ab",
+  "calculation_started_at": "2026-10-10T02:14:40-04:00",
+  "repository_worktree_dirty_at_launch": true,
+  "note": "O índice preserva o HEAD registrado no início. O código D4-D6/configuração usado no lote está no commit de cálculo; os commits posteriores atualizam somente a análise executada após as repetições."
+}
