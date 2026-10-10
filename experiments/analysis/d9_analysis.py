@@ -288,6 +288,11 @@ def _collect(
         "input_hashes": index.get("input_hashes"),
         "git_revision": index.get("git_revision"),
         "runtime_environment": index.get("runtime_environment"),
+        "source_snapshot": (
+            json.loads((results_dir / "source-snapshot.json").read_text())
+            if (results_dir / "source-snapshot.json").is_file()
+            else None
+        ),
     }
     return observations, lambda_observations, d5_observations, metadata
 
@@ -419,11 +424,25 @@ def _report_markdown(
         "",
         "Os resultados usam os hashes congelados no manifesto do lote. D4 é best-known em 142 sedes. P1/P2 são exatos somente no conjunto parcial de rotas candidatas; P3 `not_found` não prova inviabilidade da rede.",
         "",
-        "## Estatísticas por configuração",
-        "",
-        "| ID | k | Origem | Política | Objetivo | n viável | Status | Busca mediana (s) | D total mediana (km) | T máximo mediano (h) | Sobreposição mediana (km) | Gap mediano vs. melhor observado |",
-        "|---|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
+    source_snapshot = metadata.get("source_snapshot")
+    if source_snapshot:
+        lines.extend(
+            [
+                f"Código do cálculo: `{source_snapshot['calculation_code_commit']}`; "
+                f"análise: `{source_snapshot['analysis_code_commit']}`. "
+                f"HEAD registrado pelo runner: `{source_snapshot['index_git_revision']}`.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Estatísticas por configuração",
+            "",
+            "| ID | k | Origem | Política | Objetivo | n viável | Status | Busca mediana (s) | D total mediana (km) | T máximo mediano (h) | Sobreposição mediana (km) | Gap mediano vs. melhor observado |",
+            "|---|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
     for row in summary:
         distance = row["distance_total_m_median"]
         time_max = row["time_max_s_median"]
