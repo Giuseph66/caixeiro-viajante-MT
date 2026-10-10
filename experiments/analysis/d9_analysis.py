@@ -24,6 +24,7 @@ NUMERIC_FIELDS = (
     "overlap_distance_m",
     "overlap_percent",
     "algorithm_runtime_s",
+    "wall_time_s",
 )
 
 
@@ -169,13 +170,19 @@ def _d6_observation(
 def _collect(
     config: dict[str, Any],
     results_dir: Path,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, Any],
+]:
     index_path = results_dir / "index.json"
     if not index_path.is_file():
         raise FileNotFoundError(f"Manifesto de execuções D9 ausente: {index_path}")
     index = json.loads(index_path.read_text())
     observations: list[dict[str, Any]] = []
     lambda_observations: list[dict[str, Any]] = []
+    d5_observations: list[dict[str, Any]] = []
     completed_repetitions = 0
     for repeat_record in index.get("repetitions", []):
         if repeat_record.get("status") != "complete":
@@ -184,10 +191,32 @@ def _collect(
         seeds = repeat_record["seeds"]
         repeat_dir = results_dir / f"repeat-{repetition:02d}"
         d4 = _read_gzip_json(repeat_dir / STAGE_FILES["d4"])
+        d5 = _read_gzip_json(repeat_dir / STAGE_FILES["d5"])
         d6 = _read_gzip_json(repeat_dir / STAGE_FILES["d6"])
         d4_by_id = {item["scenario"]: item for item in d4["scenarios"]}
         d6_by_id = {item["scenario"]: item for item in d6["scenarios"]}
         completed_repetitions += 1
+
+        for result in d5["scenarios"]:
+            d5_observations.append(
+                {
+                    "scenario": result["scenario"],
+                    "repetition": repetition,
+                    "seed": result["seed"],
+                    "status": result["status"],
+                    "optimality_scope": "feasible best-known; no global proof for 142 cities",
+                    "objective": result["objective"],
+                    "objective_value": result["objective_value"],
+                    "origin_ibge_code": result["origin_ibge_code"],
+                    "runtime_s": result["runtime_s"],
+                    "wall_time_s": result["wall_time_s"],
+                    "total_distance_m": result["total_distance_m"],
+                    "time_max_s": result["time_max_s"],
+                    "candidate_origins_evaluated": result[
+                        "candidate_origins_evaluated"
+                    ],
+                }
+            )
 
         for item in config["scenarios"]:
             if item["agents"] == 1:
@@ -218,6 +247,7 @@ def _collect(
                     "overlap_distance_m": 0.0,
                     "overlap_percent": 0.0,
                     "algorithm_runtime_s": result["runtime_s"],
+                    "wall_time_s": result["wall_time_s"],
                     "candidate_generation_wall_time_s": None,
                     "d6_batch_elapsed_s": None,
                     "candidate_route_pool_is_complete": True,
@@ -259,7 +289,7 @@ def _collect(
         "git_revision": index.get("git_revision"),
         "runtime_environment": index.get("runtime_environment"),
     }
-    return observations, lambda_observations, metadata
+    return observations, lambda_observations, d5_observations, metadata
 
 
 def _summarize(
@@ -313,6 +343,49 @@ def _summarize(
     return summary
 
 
+def _summarize_d5(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summary = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in observations:
+        grouped.setdefault(row["scenario"], []).append(row)
+    metrics = (
+        "runtime_s",
+        "wall_time_s",
+        "objective_value",
+        "total_distance_m",
+        "time_max_s",
+    )
+    for scenario, rows in sorted(grouped.items()):
+        feasible = [
+            row
+            for row in rows
+            if row["status"] in {"feasible", "optimal_proven"}
+        ]
+        status_counts: dict[str, int] = {}
+        for row in rows:
+            status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
+        item: dict[str, Any] = {
+            "scenario": scenario,
+            "objective": rows[0]["objective"],
+            "repetitions": len(rows),
+            "feasible_repetitions": len(feasible),
+            "status_counts": status_counts,
+        }
+        for field in metrics:
+            values = [
+                float(row[field])
+                for row in feasible
+                if row.get(field) is not None
+            ]
+            item[f"{field}_mean"] = mean(values) if values else None
+            item[f"{field}_median"] = median(values) if values else None
+            item[f"{field}_sample_sd"] = stdev(values) if len(values) > 1 else None
+            item[f"{field}_min"] = min(values) if values else None
+            item[f"{field}_max"] = max(values) if values else None
+        summary.append(item)
+    return summary
+
+
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
@@ -335,6 +408,7 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 def _report_markdown(
     metadata: dict[str, Any],
     summary: list[dict[str, Any]],
+    d5_summary: list[dict[str, Any]],
     lambda_summary: list[dict[str, Any]],
 ) -> str:
     lines = [
@@ -346,16 +420,17 @@ def _report_markdown(
         "",
         "## Estatísticas por configuração",
         "",
-        "| ID | k | Origem | Política | Objetivo | n viável | Status | D total mediana (km) | T máximo mediano (h) | Sobreposição mediana (km) | Gap mediano vs. melhor observado |",
-        "|---|---:|---|---|---|---:|---|---:|---:|---:|---:|",
+        "| ID | k | Origem | Política | Objetivo | n viável | Status | Busca mediana (s) | D total mediana (km) | T máximo mediano (h) | Sobreposição mediana (km) | Gap mediano vs. melhor observado |",
+        "|---|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in summary:
         distance = row["distance_total_m_median"]
         time_max = row["time_max_s_median"]
         overlap = row["overlap_distance_m_median"]
+        runtime = row["algorithm_runtime_s_median"]
         gap = row["objective_gap_to_best_observed_median_pct"]
         lines.append(
-            "| {id} | {k} | {origin} | {policy} | {objective} | {n} | {status} | {distance} | {time} | {overlap} | {gap} |".format(
+            "| {id} | {k} | {origin} | {policy} | {objective} | {n} | {status} | {runtime} | {distance} | {time} | {overlap} | {gap} |".format(
                 id=row["experiment_id"],
                 k=row["agents"],
                 origin=row["origin_mode"],
@@ -363,11 +438,37 @@ def _report_markdown(
                 objective=row["objective"],
                 n=row["feasible_repetitions"],
                 status=json.dumps(row["status_counts"], ensure_ascii=False),
+                runtime=f"{runtime:.1f}" if runtime is not None else "—",
                 distance=f"{distance / 1000:.1f}" if distance is not None else "—",
                 time=f"{time_max / 3600:.2f}" if time_max is not None else "—",
                 overlap=f"{overlap / 1000:.1f}" if overlap is not None else "—",
                 gap=f"{gap:.2f}%" if gap is not None else "—",
             )
+        )
+    lines.extend(
+        [
+            "",
+            "## Medições do D5",
+            "",
+            "D5 é resumido separadamente antes da seleção de políticas D6; os tempos abaixo não são filtrados pelo status da rota escolhida posteriormente.",
+            "",
+            "| Cenário | n viável | Status | Solver mediano (s) | Parede mediana (s) | D total mediana (km) | T máximo mediano (h) |",
+            "|---|---:|---|---:|---:|---:|---:|",
+        ]
+    )
+    for row in d5_summary:
+        runtime = row["runtime_s_median"]
+        wall = row["wall_time_s_median"]
+        distance = row["total_distance_m_median"]
+        time_max = row["time_max_s_median"]
+        runtime_text = f"{runtime:.1f}" if runtime is not None else "—"
+        wall_text = f"{wall:.1f}" if wall is not None else "—"
+        distance_text = f"{distance / 1000:.1f}" if distance is not None else "—"
+        time_text = f"{time_max / 3600:.2f}" if time_max is not None else "—"
+        lines.append(
+            f"| {row['scenario']} | {row['feasible_repetitions']} | "
+            f"{json.dumps(row['status_counts'], ensure_ascii=False)} | "
+            f"{runtime_text} | {wall_text} | {distance_text} | {time_text} |"
         )
     lines.extend(
         [
@@ -398,6 +499,7 @@ def _report_markdown(
             "## Arquivos reproduzíveis",
             "",
             "- `observations.csv`: métricas por repetição.",
+            "- `d5-observations.csv`: métricas D5 por cenário e repetição.",
             "- `lambda-sensitivity.csv`: resultados de P2 por λ e repetição.",
             "- `summary.json`: estatísticas descritivas e metadados.",
             "- `experiments/results/.../index.json`: seeds, hashes, estado e artefatos de cada repetição.",
@@ -414,12 +516,17 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding="utf-8"))
-    observations, lambda_observations, metadata = _collect(config, args.results_dir.resolve())
+    observations, lambda_observations, d5_observations, metadata = _collect(
+        config,
+        args.results_dir.resolve(),
+    )
     summary = _summarize(observations)
+    d5_summary = _summarize_d5(d5_observations)
     lambda_summary = _summarize(lambda_observations, by_lambda=True)
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(output_dir / "observations.csv", observations)
+    _write_csv(output_dir / "d5-observations.csv", d5_observations)
     _write_csv(output_dir / "lambda-sensitivity.csv", lambda_observations)
     (output_dir / "summary.json").write_text(
         json.dumps(
@@ -427,6 +534,7 @@ def main() -> None:
                 "metadata": metadata,
                 "config": config,
                 "scenario_summary": summary,
+                "d5_scenario_summary": d5_summary,
                 "lambda_sensitivity_summary": lambda_summary,
             },
             ensure_ascii=False,
@@ -436,7 +544,7 @@ def main() -> None:
         encoding="utf-8",
     )
     (output_dir / "report.md").write_text(
-        _report_markdown(metadata, summary, lambda_summary),
+        _report_markdown(metadata, summary, d5_summary, lambda_summary),
         encoding="utf-8",
     )
     print(f"Análise D9 gravada em {output_dir}")
