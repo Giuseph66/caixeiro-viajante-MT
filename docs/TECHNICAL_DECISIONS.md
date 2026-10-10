@@ -13,7 +13,7 @@
 | TD-07 | OR-Tools para open TSP/mTSP; fim artificial sem custo físico | Implementada e medida em D4/D5 | API aceita starts/ends próprios; sem retorno à origem; resultados reais de 142 cidades são viáveis, sem prova de ótimo |
 | TD-08 | Dijkstra referência, A* com heurística admissível; matrizes separadas | Implementada no código D3; sem validação executada | A* usa distância geodésica e velocidade máxima modelada como limites inferiores |
 | TD-09 | Guardar ID físico e trajetória completa | Proposta crítica | P2/P3 requerem validação por segmento; distinguir sentidos e pistas |
-| TD-10 | P1 sobre custos base; P2/P3 com caminho e visitação conjuntos | Proposta | Compartilhamento global não está codificado por matriz estática simples |
+| TD-10 | P1 sobre custos base; P2/P3 com caminho e visitação conjuntos | D6 implementada no conjunto de rotas candidatas | Compartilhamento é avaliado por ID físico; rotas reais usam caminhos D3 e não cobrem alternativas rodoviárias globais |
 | TD-11 | Heurística não prova inviabilidade/ótimo | Determinada pelo protocolo | Ausência de solução heurística não é certificado |
 | TD-12 | PostgreSQL/PostGIS para metadados; arquivos locais para PBF/grafo/matrizes | Proposta | Hashes e manifestos mantêm ativos grandes reproduzíveis |
 | TD-13 | P2 lambda principal 1; sensibilidade 0, 0.25, 0.5, 2; v_ref=60 km/h | Provisória | Fórmula normalizada em MATHEMATICAL_MODEL.md; congelar antes da D9 |
@@ -29,6 +29,7 @@
 | TD-23 | Tempo: maxspeed numérico; sem isso, velocidade por classe configurada | Provisória | Estimativa modelada; limitações ficam no manifesto; não representa tráfego observado |
 | TD-24 | Índice temporário sparse_file_array do PyOsmium durante o parse nacional | Implementada no código D3; sem medição | Mantém localizações fora do grafo em disco e limita cópia de todos os nós na RAM; custo de I/O será medido |
 | TD-25 | Teto rígido de 25 GB e processos `spawn` nos experimentos paralelos | Implementada e medida em D4/D5 | Runner aplica cgroup `MemoryMax`; workers recebem matrizes de custos sem trajetórias completas; pico D5 de 15.284.240.384 bytes |
+| TD-26 | P2/P3 por enumeração de rotas candidatas com validação física final | Implementada e medida em D6 | Busca exaustiva é ótima apenas no conjunto enumerado; `not_found` em rede real não comprova inviabilidade global; pico D6 de 15.259.635.712 bytes |
 
 ## P2
 

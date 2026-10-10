@@ -71,6 +71,16 @@ D5.1–D5.3 concluídas em `backend/app/optimization/visitation/mtsp.py`: mTSP a
 
 Todos os resultados reais são `feasible`, sem prova de ótimo. O2 avaliou as 142 origens por cenário dentro de um limite compartilhado de 300 s. Execução reproduzível: `.venv/bin/python experiments/runners/d5_open_mtsp.py --time-limit-s 300 --workers 8 --output data/processed/mtsp-d5-reproduction.json`. Com 8 processos em 8 CPUs, levou 430,778 s; o cgroup limitou memória a 24.999.997.440 bytes e observou pico de 15.284.240.384 bytes. Manifesto completo, rotas, IDs e métricas: `data/manifests/mtsp-benchmarks-mt.json`.
 
+## Estado da D6 em 2026-10-10
+
+D6.1–D6.4 implementadas em `backend/app/optimization/overlap.py`. A sobreposição é calculada pelos IDs físicos das arestas: sentidos opostos contam como o mesmo segmento, e repetição pelo mesmo agente só conta uma vez. A busca exaustiva seleciona rotas ativas que cobrem cada sede uma vez, pontua P1/P2 e rejeita interseções entre agentes em P3. Os 5 testes focados passaram; suíte backend: 38 passaram.
+
+No relatório real, P1 mediu sobreposição entre 0 e 897,36 km nos oito cenários D5. Com λ=1, a busca de candidatas reduziu O2/k=2/tempo de 206,45 para 164,10 km, mudando a origem de 5105150 para 5107925; o tempo máximo subiu de 319.742 para 331.049 s. Em O2/k=3/tempo, reduziu de 897,36 para 857,02 km; o tempo máximo subiu de 220.778 para 273.868 s. λ=0 reproduz P1.
+
+P3 encontrou combinação sem trechos compartilhados em 2 dos 8 cenários: O1/k=2/distância e O2/k=2/distância. Nos outros seis, retornou `not_found`; isso não prova inviabilidade da rede. Nos grafos sintéticos, a enumeração exaustiva distingue conjunto viável de conjunto inviável de candidatas.
+
+Limite medido: a busca real combina rotas geradas pelo OR-Tools com até 60 s por variante; cada perna mantém o caminho D3 mais curto na métrica escolhida. A enumeração é exata dentro desse conjunto finito, mas não inclui todos os caminhos rodoviários alternativos e não prova ótimo global de P2 ou inviabilidade global de P3. As 56 variantes adicionais usaram `spawn`, 8 workers/CPUs e cgroup limitado a 25.000.000.000 bytes; pico observado 15.259.635.712 bytes. Reproduzir: `.venv/bin/python experiments/runners/d6_overlap.py --variants 8 --workers 8 --time-limit-s 60 --output data/processed/overlap-d6-reproduction.json`. Relatório com métricas, IDs físicos, seeds e origens: `data/manifests/overlap-benchmarks-mt.json`.
+
 ## Portões de aceite
 
 - D1: ambiente reproduzível e dependências compatíveis antes da ingestão.

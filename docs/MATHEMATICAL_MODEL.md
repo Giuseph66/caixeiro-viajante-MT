@@ -1,6 +1,6 @@
 # Modelo matemático
 
-**Estado:** formulação de referência da Entrega 0; P2/P3 na rede integral ainda requerem validação computacional.  
+**Estado:** D6 valida P1/P2/P3 por IDs físicos e busca exaustiva em conjuntos finitos de rotas; P2/P3 ainda não cobrem todos os caminhos alternativos da rede integral.
 **Unidades:** distância em metros, tempo em segundos, municípios por código IBGE.
 
 ## Conjuntos e custos
@@ -71,6 +71,8 @@ O termo temporal converte distância redundante em tempo equivalente. Relatar se
 P2 é acoplado: mudar caminho de um agente muda a penalidade de outro. Matriz estática não representa O sozinha. Enquanto houver candidatos, reponderação ou busca local sem prova, resultado é heurístico, não ótimo global.
 
 **P3 — proibida:** para todo segmento e, soma_a u_ae ≤ 1. Inclui sentidos opostos; um agente pode reutilizar seu trecho sem violação. Validar sobre sequências físicas finais. Sem solução heurística significa “nenhuma solução viável encontrada”; “inviável comprovada” exige certificado que cubra a instância integral.
+
+Na execução D6 real, a busca combina sequências de visita candidatas e mantém o caminho D3 mais curto de cada perna. A enumeração é exaustiva apenas sobre as rotas fornecidas; `not_found` em P3 não prova inviabilidade da rede rodoviária.
 
 ## Origem
 
