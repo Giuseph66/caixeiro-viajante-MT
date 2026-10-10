@@ -1,3 +1,4 @@
+absl-py==2.5.1
 alembic==1.20.0
 annotated-doc==0.0.5
 annotated-types==0.8.0
@@ -10,13 +11,18 @@ h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
 idna==3.20
+immutabledict==4.3.1
 iniconfig==2.3.1
 Mako==1.4.3
 MarkupSafe==3.0.4
+numpy==2.5.3
 opentelemetry-api==1.45.1
+ortools==9.15.6755
 osmium==4.3.1
 packaging==26.3
+pandas==3.0.6
 pluggy==1.6.0
+protobuf==6.33.6
 psycopg==3.3.6
 psycopg-binary==3.3.6
 pydantic==2.14.0
@@ -26,9 +32,11 @@ Pygments==2.21.0
 pyproj==3.8.0
 pyshp==3.1.6
 pytest==9.1.1
+python-dateutil==2.9.0.post0
 python-dotenv==1.2.4
 requests==2.34.2
 ruff==0.16.10
+six==1.17.0
 SQLAlchemy==2.1.4
 starlette==0.52.1
 typing-inspection==0.4.4

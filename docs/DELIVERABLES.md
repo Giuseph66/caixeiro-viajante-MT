@@ -44,7 +44,15 @@ Cada tarefa produz evidência revisável. Parar ao fim de cada entrega e aguarda
 
 ## Estado da D3 em 2026-10-09
 
-O código D3.1–D3.4 e testes sintéticos foram adicionados. Ainda não houve execução dos testes D3 nem leitura do PBF para construir a rede. Matriz real, conectividade das 142 sedes, hashes de saída e benchmarks seguem pendentes. O projeto permanece na D3; D4 não começou.
+D3.1–D3.4 concluídas. Testes focados: 16 passaram. Cache e manifesto: `data/manifests/travel-matrix-mt.json`, hash `043328bf1f67cf5d7b4cd9a4d2304169650f9e5acee5a057c1f4609e9b19a7a3`. Foram processadas 142 sedes; todas encaixaram até 108,92 m (média 40,12 m), e não houve pares dirigidos inalcançáveis em distância ou tempo. O cache gzip tem 316.512.806 bytes. A execução completa durou 1.538,863 s, pico de 25.288,43 MiB e 8 workers. Tempos do benchmark: 5 cidades 3,619 s; 10 5,028 s; 20 15,335 s; 50 74,481 s; 142 592,301 s. Binário/relatórios grandes permanecem locais; manifesto e código estão versionados.
+
+## Estado da D4 em 2026-10-10
+
+D4.1–D4.3 concluídas em `backend/app/optimization/visitation/tsp.py`. Open TSP usa arcos dirigidos, origem fixa ou variável, destino artificial sem custo de retorno e baseline vizinho mais próximo. Até 9 sedes, enumera todas as ordens e distingue `optimal_proven` de `infeasible_proven`; em 142 sedes, reporta apenas `feasible`.
+
+Cinco testes sintéticos passaram. Quatro cenários reais foram calculados e auditados contra o cache D3: cada rota cobre as 142 sedes uma vez, tem 141 pernas abertas, e custos/caminhos dirigidos conferem com a matriz. Cuiabá fixa (O1): distância 10.386.464,340 m, 21,8% abaixo do baseline; tempo 545.267,081 s, 21,1% abaixo. Origem variável (O2): código IBGE 5107578 nos dois objetivos; distância 10.023.852,615 m, 20,5% abaixo do baseline; tempo 539.273,514 s, 17,0% abaixo. Nenhum resultado de 142 cidades tem prova de ótimo global. Detalhes, sequências e auditoria: `data/manifests/tsp-benchmarks-mt.json`.
+
+Runner reproduzível: `experiments/runners/d4_open_tsp.py`. Os quatro cenários executaram em sequência, 300 s de busca por cenário, dentro de cgroup limitado a 25.000.000.000 bytes; pico cgroup observado 16.809.508.864 bytes. Revalidação do relatório também exige o mesmo teto. O processamento paralelo de matrizes D3 continua em 8 workers; TSP usou um solver por vez para manter o limite de RAM.
 
 ## Portões de aceite
 
