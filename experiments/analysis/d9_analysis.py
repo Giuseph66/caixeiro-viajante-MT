@@ -439,7 +439,9 @@ def _report_markdown(
         [
             "## Estatísticas por configuração",
             "",
-            "| ID | k | Origem | Política | Objetivo | n viável | Status | Busca mediana (s) | D total mediana (km) | T máximo mediano (h) | Sobreposição mediana (km) | Gap mediano vs. melhor observado |",
+            "O tempo mediano usa `runtime_s` do D4 para k=1 e `candidate_generation_wall_time_s` do D6 para k=2/3. O tempo de solver/parede do D5 aparece na seção própria; o tempo total do lote D6 permanece em `d6_batch_elapsed_s` nos CSVs.",
+            "",
+            "| ID | k | Origem | Política | Objetivo | n viável | Status | Tempo mediano reportado (s) | D total mediana (km) | T máximo mediano (h) | Sobreposição mediana (km) | Gap mediano vs. melhor observado |",
             "|---|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
