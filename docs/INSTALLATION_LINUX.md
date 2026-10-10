@@ -59,13 +59,13 @@ Com o ambiente Python instalado e ativo:
     cd backend
     ../.venv/bin/python -m app.geography.import_data
 
-O processo valida códigos e sedes, grava `data/processed/municipalities-mt.geojson`, conta tags `highway` do PBF em streaming e atualiza os relatórios/manifests em `data/processed/` e `data/manifests/`. A leitura nacional não monta o grafo nem filtra acessos automotivos; a D3 implementa esse processamento em etapa separada.
+O processo valida códigos e sedes, grava `data/processed/municipalities-mt.geojson`, conta tags `highway` do PBF em streaming e atualiza os relatórios/manifests em `data/processed/` e `data/manifests/`. A leitura nacional não monta o grafo nem filtra acessos automotivos. O comando aplica `MemoryMax=25.000.000.000` antes de começar.
 
 Os arquivos exatos e resultados da execução estão em [DATA_QUALITY_D2.md](DATA_QUALITY_D2.md).
 
 ## Construir grafo e matrizes D3
 
-A malha estadual IBGE usada para delimitar o recorte é um arquivo público de 305 KiB. O importador lê o PBF nacional uma vez, usa índice PyOsmium esparso temporário em disco e guarda no grafo em memória somente trechos dentro da caixa do limite estadual acrescida de 100 km.
+A malha estadual IBGE usada para delimitar o recorte é um arquivo público de 305 KiB. O importador lê o PBF nacional uma vez, usa índice PyOsmium esparso temporário em disco e guarda no grafo em memória somente trechos dentro da caixa do limite estadual acrescida de 100 km. A construção aplica `MemoryMax=25.000.000.000` antes de ler o PBF.
 
 Na raiz do projeto:
 
@@ -75,17 +75,17 @@ Com o ambiente local ativo, execute a partir de backend:
 
     ../.venv/bin/python -m app.graph.builder
 
-O comando verifica o SHA-256 do snapshot OSM, constrói data/processed/road-network-mt.jsonl.gz e atualiza data/manifests/road-network-mt.json. O primeiro processamento ainda não foi medido; a D2 registrou 98,222 s e 436,72 MiB ao contar tags do mesmo PBF, sem construir rede.
+O comando verifica o SHA-256 do snapshot OSM, constrói `data/processed/road-network-mt.jsonl.gz` e atualiza `data/manifests/road-network-mt.json`. Grafo e matrizes D3 já foram gerados; hashes e contagens estão nos manifestos. A D2 registrou 98,222 s e 436,72 MiB ao contar tags do mesmo PBF, sem construir rede.
 
 Depois da revisão do grafo e do uso de memória, as matrizes podem ser calculadas:
 
     ../.venv/bin/python -m app.routing.matrices
 
-Esse comando executa Dijkstra para 142 origens, em distância e tempo, grava caminhos por par e cria cache nomeado pelo hash. Para registrar tamanhos 5/10/20/50/142:
+Esse comando executa Dijkstra para 142 origens, em distância e tempo, grava caminhos por par e cria cache nomeado pelo hash. Ele aplica o mesmo `MemoryMax` antes de carregar o grafo. A medição histórica D3 levou 1.538,863 s e atingiu 25.288,43 MiB, antes desse teto; confira a RAM antes de refazer o benchmark completo. Para registrar tamanhos 5/10/20/50/142:
 
     ../.venv/bin/python -m app.routing.matrices --benchmark
 
-O benchmark repete cálculos progressivos sobre o grafo regional; custo real ainda é desconhecido. Confirme recursos antes de iniciar; duração/RSS ainda não foram medidos. Custos de matriz começam no nó viário associado à sede e não incluem o conector fora da rede. O relatório registra snaps acima de 10 km e pares sem caminho dirigido.
+O benchmark repete cálculos progressivos sobre o grafo regional. Custos de matriz começam no nó viário associado à sede e não incluem o conector fora da rede. O relatório registra snaps acima de 10 km e pares sem caminho dirigido.
 
 As restrições via nó são aplicadas. Via-ways, acessos/velocidades condicionais, barreiras e balsas não entram neste perfil inicial e ficam anotados no manifesto.
 

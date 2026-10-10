@@ -58,6 +58,7 @@ def solve_open_tsp(
     time_limit_s: float = 60.0,
     prove_small_instances: bool = True,
     exact_city_limit: int = 9,
+    seed: int | None = None,
 ) -> TspSolution:
     """Solve an open, directed TSP; ``None`` origin lets the optimizer choose it."""
     started = perf_counter()
@@ -66,6 +67,8 @@ def solve_open_tsp(
         raise ValueError("O limite de tempo deve ser positivo e finito")
     if exact_city_limit < 1:
         raise ValueError("O limite de enumeração deve ser positivo")
+    if seed is not None and not 0 <= seed <= 2**31 - 1:
+        raise ValueError("A semente deve estar entre 0 e 2^31-1")
 
     if prove_small_instances and len(seats) <= exact_city_limit:
         return solve_open_tsp_exact(
@@ -105,6 +108,7 @@ def solve_open_tsp(
         services,
         fixed_start,
         time_limit_s,
+        seed,
     )
     candidates = [order for order in (baseline_order, ortools_order) if order is not None]
     heuristic_value = (
@@ -297,6 +301,7 @@ def _solve_with_ortools(
     service_times_s: dict[int, float],
     fixed_start: int | None,
     time_limit_s: float,
+    seed: int | None,
 ) -> tuple[tuple[int, ...] | None, int]:
     size = len(seats)
     source_node = size if fixed_start is None else fixed_start
@@ -346,6 +351,8 @@ def _solve_with_ortools(
     whole_seconds = int(time_limit_s)
     parameters.time_limit.seconds = whole_seconds
     parameters.time_limit.nanos = int((time_limit_s - whole_seconds) * 1_000_000_000)
+    if seed is not None:
+        routing.solver().ReSeed(seed)
     solution = routing.SolveWithParameters(parameters)
     status = int(routing.status())
     if solution is None:

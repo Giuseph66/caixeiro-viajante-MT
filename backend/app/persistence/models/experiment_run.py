@@ -15,19 +15,37 @@ class ExperimentRun(Base):
             "status IN ('queued', 'running', 'succeeded', 'failed', 'interrupted')",
             name="ck_experiment_runs_status",
         ),
+        CheckConstraint(
+            "progress_percent >= 0 AND progress_percent <= 100",
+            name="ck_experiment_runs_progress_percent",
+        ),
         Index("ix_experiment_runs_status_created_at", "status", "created_at"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    job_type: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="mtsp", server_default=text("'mtsp'")
+    )
     status: Mapped[str] = mapped_column(
         String(24), nullable=False, default="queued", server_default=text("'queued'")
     )
     parameters: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    progress_percent: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    progress_stage: Mapped[str | None] = mapped_column(String(240))
+    log_tail: Mapped[str | None] = mapped_column(Text)
+    worker_pid: Mapped[int | None] = mapped_column(Integer)
     data_manifest_sha256: Mapped[str | None] = mapped_column(String(64))
     seed: Mapped[int | None] = mapped_column(Integer)
     algorithm_version: Mapped[str | None] = mapped_column(String(100))
+    result_path: Mapped[str | None] = mapped_column(Text)
+    result_summary: Mapped[dict[str, object] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

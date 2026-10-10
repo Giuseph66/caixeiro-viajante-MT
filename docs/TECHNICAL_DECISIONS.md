@@ -1,6 +1,6 @@
 # Decisões técnicas
 
-**Data:** 2026-10-09. **Estado:** decisões D0–D3; D3 possui código, mas falta executar/validar a importação de dados reais.
+**Data:** 2026-10-10. **Estado:** D0–D8 implementadas e verificadas; D9 configurada, orçada e em execução.
 
 | ID | Decisão | Estado | Justificativa / condição |
 |---|---|---|---|
@@ -28,8 +28,12 @@
 | TD-22 | Conversões automotivas via nó suportadas; via-ways/condicionais registradas como não suportadas | Implementada no código D3; sem validação executada | Evita apresentar cobertura parcial de restrições como cobertura total |
 | TD-23 | Tempo: maxspeed numérico; sem isso, velocidade por classe configurada | Provisória | Estimativa modelada; limitações ficam no manifesto; não representa tráfego observado |
 | TD-24 | Índice temporário sparse_file_array do PyOsmium durante o parse nacional | Implementada no código D3; sem medição | Mantém localizações fora do grafo em disco e limita cópia de todos os nós na RAM; custo de I/O será medido |
-| TD-25 | Teto rígido de 25 GB e processos `spawn` nos experimentos paralelos | Implementada e medida em D4/D5 | Runner aplica cgroup `MemoryMax`; workers recebem matrizes de custos sem trajetórias completas; pico D5 de 15.284.240.384 bytes |
+| TD-25 | Teto rígido de 25 GB em unidade `systemd-run` própria | Aplicado antes de carregar dados em D2–D6 | `MemoryMax=25.000.000.000`; não usa o cgroup compartilhado do editor; falha fechada se o teto não puder ser aplicado. A medição D3 histórica de 25.288 MiB é anterior à proteção |
 | TD-26 | P2/P3 por enumeração de rotas candidatas com validação física final | Implementada e medida em D6 | Busca exaustiva é ótima apenas no conjunto enumerado; `not_found` em rede real não comprova inviabilidade global; pico D6 de 15.259.635.712 bytes |
+| TD-27 | Persistência de execuções em PostgreSQL/SQLAlchemy; ativos geográficos ficam em arquivos locais | Implementada em D7 | Manifestos guardam hashes, configuração, seed, ambiente e referências aos resultados; migração Alembic reversível |
+| TD-28 | Worker local serial para jobs de otimização | Implementada em D7 | API permanece responsiva; estado, progresso, logs, falha, cancelamento e recuperação são persistidos |
+| TD-29 | MapLibre exibe GeoJSON dos IDs e coordenadas reais das arestas | Implementada em D8 | Sem linhas retas entre cidades ou tiles remotos; comparação usa camada separada e métricas exportáveis |
+| TD-30 | D9 usa 28 configurações, dez repetições e seeds derivadas por estágio | Em execução | Orçamento prévio, até oito workers, limites D4/D5/D6 congelados e sensibilidade λ reusando o conjunto de candidatas |
 
 ## P2
 
@@ -48,7 +52,7 @@ Se P3 não for praticável na rede integral, registrar a limitação; não relax
 
 ## Compatibilidade
 
-O ambiente Python 3.13 já contém PyOsmium, PyShp e PyProj em .venv; D3 não adicionou dependências. Importações/sintaxe foram verificadas. A construção do grafo e as matrizes reais não foram executadas; leitura de tags D2 não comprova memória/tempo da rede filtrada.
+O ambiente Python 3.13 contém PyOsmium, PyShp e PyProj em .venv. O grafo e as matrizes reais foram gerados; a medição histórica D3 não usou a unidade `systemd-run` adicionada depois. Repetições futuras do cálculo já iniciam dentro do teto antes de carregar o grafo.
 
 ## Referências oficiais consultadas
 

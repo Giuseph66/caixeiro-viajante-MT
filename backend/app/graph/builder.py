@@ -4,6 +4,7 @@ import json
 import math
 import resource
 import re
+import sys
 import tempfile
 from collections import Counter
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ import osmium
 import shapefile
 from pyproj import CRS, Geod, Transformer, proj_version_str
 
+from app.core.memory_limit import enforce_memory_limit
 from app.graph.network import RoadEdge, RoadNetwork, RoadNode, TurnRestriction
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -583,6 +585,9 @@ def build_and_persist() -> dict[str, object]:
 
 
 def main() -> None:
+    enforce_memory_limit(
+        command=[sys.executable, "-m", "app.graph.builder", *sys.argv[1:]]
+    )
     print(json.dumps(build_and_persist(), ensure_ascii=False, indent=2))
 
 

@@ -1,10 +1,10 @@
-# Arquitetura proposta
+# Arquitetura do sistema
 
-**Estado:** base D1/D2 implementada; código D3 em andamento. Grafo, caminhos e matrizes usam backend/app/graph/, backend/app/shortest_path/ e backend/app/routing/matrices.py. A rede real ainda não foi gerada.
+**Estado:** D1–D8 implementadas; lote e análise D9 em execução. Grafo, caminhos e matrizes usam `backend/app/graph/`, `backend/app/shortest_path/` e `backend/app/routing/matrices.py`; a rede real e as matrizes têm manifestos congelados.
 
 ## Componentes
 
-| Camada | Responsabilidade | Caminho planejado |
+| Camada | Responsabilidade | Caminho principal |
 |---|---|---|
 | Catálogo territorial | Códigos IBGE, nomes, sedes e coordenadas | backend/app/geography/municipalities.py |
 | Aquisição/ingestão | Validação do catálogo, leitura PyOsmium e manifestos | backend/app/geography/import_data.py, municipalities.py, osm_importer.py |
@@ -24,11 +24,11 @@
 
 1. Obter a lista oficial do IBGE e usar código IBGE como chave. A D2 persistiu 142 códigos únicos.
 2. Selecionar Cidade / Sede Municipal; validar uma por município e transformar os pontos de EPSG:4674 para EPSG:4326. O código D3 encaixa cada sede no nó viário mais próximo e registra distância.
-3. A D2 guardou snapshot nacional PBF, hash, licença e relatório de tags highway. O importador D3 filtra perfil de automóvel numa caixa oficial IBGE + 100 km; a execução real aguarda confirmação de recursos antes do comando longo.
-4. Dijkstra e A* calculam distância/tempo separadamente; matrizes guardam custos dirigidos e sequência dos segmentos.
-5. Distribuir sedes e escolher sequência. P2/P3 acoplam escolha de caminhos e uso físico entre agentes.
-6. Recalcular métricas e validar a solução. Persistir configuração, seeds, software, dados, status, limite e artefatos.
-7. API e frontend apresentam somente rotas e métricas validadas.
+3. A D2 guardou snapshot nacional PBF, hash, licença e relatório de tags highway. O importador D3 filtra perfil de automóvel numa caixa oficial IBGE + 100 km e aplica o teto de RAM antes da leitura.
+4. Dijkstra e A* calculam distância/tempo separadamente; as matrizes dirigidas guardam custos e caminhos por par, congelados por hash.
+5. D4–D6 calculam sequência, distribuição de sedes e políticas de sobreposição. P2/P3 selecionam rotas candidatas considerando o uso físico entre agentes.
+6. Recalcular métricas e validar a solução. A API persiste configuração, seeds, software, dados, status, progresso e referências aos artefatos.
+7. API e frontend apresentam rotas rodoviárias e métricas validadas; o worker local serial executa jobs e publica progresso e cancelamento.
 
 ## Contratos mínimos
 
@@ -49,15 +49,15 @@ Preservar vias paralelas, acesso de automóveis, mão única, geometria e proced
 
 Conversões proibidas podem depender da sequência de dois trechos. Se o grafo não representar relações OSM de restrição, usar estado de busca por segmento dirigido ou registrar a limitação; uma aresta permitida isoladamente não valida toda conversão.
 
-PBF local reduz dependência de Overpass. A referência OSMnx documenta grafos e leitura de OSM XML; escolher e medir na D2 um adaptador PBF (libosmium/PyOsmium/Pyrosm ou conversão com osmium). Não manter XML expandido sem medir RAM/disco.
+PBF local reduz dependência de Overpass. A leitura usa PyOsmium/libosmium com índice temporário esparso em disco; o grafo regional preserva segmentos dirigidos, restrições via nó e IDs físicos. Os limites para via-ways e tags condicionais estão registrados no manifesto D3.
 
 - Matriz de distância minimiza soma de length_m; matriz de tempo minimiza travel_time_s.
 - Matrizes são dirigidas e podem ser assimétricas. Sem caminho não vira zero nem linha reta.
 - Dijkstra é referência e opção para varredura por origem; A* atende pares e comparação, com heurística admissível validada.
-- Guardar a trajetória por segmentos, não somente os custos. Para P2/P3, gerar caminhos alternativos ou aplicar penalidades conjuntas.
+- Guardar a trajetória por segmentos, não somente os custos. D6 seleciona entre rotas candidatas geradas pelos solvers e registra que o conjunto não contém todos os caminhos possíveis.
 - OR-Tools recebe visitação e fins artificiais sem custo físico. Cada agente ativo precisa de atendimento distinto além da origem.
 - Objetivo B é max(T_a); custo de span somado aos arcos não prova, por si, minimização pura desse máximo.
-- P2/P3 ficam em camada própria; resultado heurístico deve ser identificado.
+- P2/P3 ficam em camada própria; D6 identifica resultado heurístico e o escopo da prova.
 
 ## Rota aberta
 
@@ -67,14 +67,14 @@ Se a origem for uma sede obrigatória, ela é contada como atendida uma vez no i
 
 ## Persistência, API e interface
 
-- PostgreSQL/PostGIS: municípios, snapshots, configurações, estados, métricas, validações e referências a artefatos. Extensão PostGIS somente em instalação local autorizada.
+- PostgreSQL/SQLAlchemy: configurações, estados, progresso, métricas, validações e referências a artefatos. O esquema atual não requer PostGIS.
 - Sistema de arquivos: PBF, manifestos, grafo, matrizes e sequências de segmentos. Banco guarda hash, formato e caminho relativo.
 - Worker local independente para jobs longos. Estados do job: queued, running, succeeded, failed, interrupted. Status da solução é campo separado.
-- API futura: saúde, municípios, estado dos dados, algoritmos, configs, criar/listar/consultar job, métricas, GeoJSON e exportação.
-- React/TypeScript/Vite, MapLibre GL JS e gráficos; GeoJSON deriva de caminhos rodoviários reais, com atribuição OSM visível.
+- API FastAPI: saúde, municípios, estado dos dados, algoritmos, configs, criar/listar/consultar job, métricas, GeoJSON e exportação.
+- React/TypeScript/Vite e MapLibre GL JS; GeoJSON deriva de caminhos rodoviários reais, com atribuição OSM visível.
 
 Sem fila distribuída na primeira versão. Sem banco em contêiner. Configuração local em .env e exemplo sem segredos.
 
-## Dependências previstas
+## Dependências implementadas
 
-Python, PyOsmium, PyShp, PyProj, FastAPI, Pydantic, SQLAlchemy, Alembic, pytest e Ruff; backend de visitação futuro usa OR-Tools; PostgreSQL/PostGIS para persistência espacial; React, TypeScript, Vite, MapLibre GL JS e biblioteca de gráficos. D3 usa adjacency própria e não adiciona NetworkX/OSMnx; nenhuma dependência nova nesta entrega.
+Python, PyOsmium, PyShp, PyProj, FastAPI, Pydantic, SQLAlchemy, Alembic, OR-Tools, pytest e Ruff; PostgreSQL para persistência; React, TypeScript, Vite e MapLibre GL JS. D3 usa adjacency própria e não adiciona NetworkX/OSMnx.

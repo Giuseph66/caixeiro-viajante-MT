@@ -81,6 +81,24 @@ P3 encontrou combinação sem trechos compartilhados em 2 dos 8 cenários: O1/k=
 
 Limite medido: a busca real combina rotas geradas pelo OR-Tools com até 60 s por variante; cada perna mantém o caminho D3 mais curto na métrica escolhida. A enumeração é exata dentro desse conjunto finito, mas não inclui todos os caminhos rodoviários alternativos e não prova ótimo global de P2 ou inviabilidade global de P3. As 56 variantes adicionais usaram `spawn`, 8 workers/CPUs e cgroup limitado a 25.000.000.000 bytes; pico observado 15.259.635.712 bytes. Reproduzir: `.venv/bin/python experiments/runners/d6_overlap.py --variants 8 --workers 8 --time-limit-s 60 --output data/processed/overlap-d6-reproduction.json`. Relatório com métricas, IDs físicos, seeds e origens: `data/manifests/overlap-benchmarks-mt.json`.
 
+## Estado da D7 em 2026-10-10
+
+D7.1–D7.3 implementadas: migração Alembic para progresso/resultados, repositório SQLAlchemy e worker local serial que executa D4–D6 e persiste estado, logs, falhas, cancelamento e recuperação. A API expõe saúde, municípios, datasets, configurações, algoritmos, jobs e endpoints por execução para métricas, rotas, GeoJSON e exportação JSON; `/api/jobs` também está disponível como alias de `/api/experiments`.
+
+Verificação: suíte backend com 44 testes aprovados (um aviso de depreciação do Starlette/AnyIO); migração SQLite aplicada e revertida com sucesso. Os testes da API usam banco temporário e grafo sintético, sem carregar o grafo rodoviário de 300 MB.
+
+## Estado da D8 em 2026-10-10
+
+D8.1–D8.3 implementadas no frontend React/TypeScript/Vite: formulário de experimento, histórico e logs, progresso, cancelamento, seleção de cenários, comparação entre execuções e exportação JSON. O mapa MapLibre consome GeoJSON das arestas rodoviárias reais e colore agentes; as rotas comparadas aparecem em camada tracejada. Não há linha reta aproximada nem tiles externos. A interface informa o limite de RAM e o escopo de `not_found` em P3.
+
+Build TypeScript/Vite aprovado. A tela principal carrega o mapa sob demanda, mantendo o bundle inicial em aproximadamente 75 KB gzip.
+
+## Estado da D9 em 2026-10-10
+
+Configuração D9 congelada em `experiments/configurations/d9-mt.json`: 28 cenários estruturais × 10 repetições, seeds próprias por estágio, limites de 300 s por cenário D4/D5 e 60 s por variante D6. O orçamento foi registrado antes da execução em `experiments/analysis/d9-budget-mt-2026-10-10.md`: até 8 CPUs, estimativa de 6,84 h com margem de 20%, reserva de 2 GB e `MemoryMax=25.000.000.000` bytes. Os hashes do grafo e das matrizes conferem com o snapshot configurado.
+
+O lote foi iniciado em 2026-10-10 na unidade `d9-mt-20261010.service`, com oito CPUs e o teto de RAM aplicado ao processo e aos workers. Os relatórios ficam compactados por repetição e podem ser retomados. A análise estatística e os resultados observados serão registrados quando as dez repetições terminarem; `not_found` segue sem significar prova de inviabilidade global.
+
 ## Portões de aceite
 
 - D1: ambiente reproduzível e dependências compatíveis antes da ingestão.
@@ -91,4 +109,4 @@ Limite medido: a busca real combina rotas geradas pelo OR-Tools com até 60 s po
 - D9: orçamento apresentado antes de experimentos caros.
 - D10: separar medição, hipótese, heurística e prova.
 
-Os testes das entregas futuras continuam planejados. Na D1/D2 foram executados os testes básicos registrados nos respectivos relatórios.
+Os testes das entregas D1–D8 foram executados e registrados nas respectivas seções. A D9 aguarda término e análise do lote; a síntese final D10 aguarda os resultados observados.

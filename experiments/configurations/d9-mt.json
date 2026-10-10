@@ -1,0 +1,56 @@
+{
+  "study_id": "d9-mato-grosso-2026-10-10",
+  "repetitions": 10,
+  "seed_base": 20261008,
+  "seed_stride": 10,
+  "worker_processes": 8,
+  "memory_limit_bytes": 25000000000,
+  "time_limits_seconds": {
+    "d4_per_scenario": 300,
+    "d5_per_scenario": 300,
+    "d6_per_variant": 60
+  },
+  "lambda_main": 1.0,
+  "lambda_sensitivity": [0.0, 0.25, 0.5, 2.0],
+  "reference_speed_kph": 60.0,
+  "expected_inputs": {
+    "graph_sha256": "8e2a4453cb7f3b3e4b48f3385dbc3674faef85a45abcbaa1be1cf4d23730d79b",
+    "matrix_cache_key": "043328bf1f67cf5d7b4cd9a4d2304169650f9e5acee5a057c1f4609e9b19a7a3",
+    "matrix_cache_sha256": "3988751ef5cfecc81bf8ee99d48e2dbe98ba6f4202febd9986b714984cb91cf6"
+  },
+  "output_dir": "experiments/results/d9-mato-grosso-2026-10-10",
+  "scenarios": [
+    {"id": "E01", "agents": 1, "origin": "fixed", "policy": "P1", "objective": "distance", "d4_scenario": "O1-fixed-cuiaba-distance"},
+    {"id": "E02", "agents": 1, "origin": "fixed", "policy": "P1", "objective": "time", "d4_scenario": "O1-fixed-cuiaba-time"},
+    {"id": "E03", "agents": 1, "origin": "optimized", "policy": "P1", "objective": "distance", "d4_scenario": "O2-variable-origin-distance"},
+    {"id": "E04", "agents": 1, "origin": "optimized", "policy": "P1", "objective": "time", "d4_scenario": "O2-variable-origin-time"},
+
+    {"id": "E05", "agents": 2, "origin": "fixed", "policy": "P1", "objective": "distance", "d6_scenario": "O1-fixed-cuiaba-k2-distance"},
+    {"id": "E06", "agents": 2, "origin": "fixed", "policy": "P1", "objective": "time", "d6_scenario": "O1-fixed-cuiaba-k2-time"},
+    {"id": "E07", "agents": 2, "origin": "fixed", "policy": "P2", "objective": "distance", "d6_scenario": "O1-fixed-cuiaba-k2-distance"},
+    {"id": "E08", "agents": 2, "origin": "fixed", "policy": "P2", "objective": "time", "d6_scenario": "O1-fixed-cuiaba-k2-time"},
+    {"id": "E09", "agents": 2, "origin": "fixed", "policy": "P3", "objective": "distance", "d6_scenario": "O1-fixed-cuiaba-k2-distance"},
+    {"id": "E10", "agents": 2, "origin": "fixed", "policy": "P3", "objective": "time", "d6_scenario": "O1-fixed-cuiaba-k2-time"},
+
+    {"id": "E11", "agents": 2, "origin": "optimized", "policy": "P1", "objective": "distance", "d6_scenario": "O2-variable-origin-k2-distance"},
+    {"id": "E12", "agents": 2, "origin": "optimized", "policy": "P1", "objective": "time", "d6_scenario": "O2-variable-origin-k2-time"},
+    {"id": "E13", "agents": 2, "origin": "optimized", "policy": "P2", "objective": "distance", "d6_scenario": "O2-variable-origin-k2-distance"},
+    {"id": "E14", "agents": 2, "origin": "optimized", "policy": "P2", "objective": "time", "d6_scenario": "O2-variable-origin-k2-time"},
+    {"id": "E15", "agents": 2, "origin": "optimized", "policy": "P3", "objective": "distance", "d6_scenario": "O2-variable-origin-k2-distance"},
+    {"id": "E16", "agents": 2, "origin": "optimized", "policy": "P3", "objective": "time", "d6_scenario": "O2-variable-origin-k2-time"},
+
+    {"id": "E17", "agents": 3, "origin": "fixed", "policy": "P1", "objective": "distance", "d6_scenario": "O1-fixed-cuiaba-k3-distance"},
+    {"id": "E18", "agents": 3, "origin": "fixed", "policy": "P1", "objective": "time", "d6_scenario": "O1-fixed-cuiaba-k3-time"},
+    {"id": "E19", "agents": 3, "origin": "fixed", "policy": "P2", "objective": "distance", "d6_scenario": "O1-fixed-cuiaba-k3-distance"},
+    {"id": "E20", "agents": 3, "origin": "fixed", "policy": "P2", "objective": "time", "d6_scenario": "O1-fixed-cuiaba-k3-time"},
+    {"id": "E21", "agents": 3, "origin": "fixed", "policy": "P3", "objective": "distance", "d6_scenario": "O1-fixed-cuiaba-k3-distance"},
+    {"id": "E22", "agents": 3, "origin": "fixed", "policy": "P3", "objective": "time", "d6_scenario": "O1-fixed-cuiaba-k3-time"},
+
+    {"id": "E23", "agents": 3, "origin": "optimized", "policy": "P1", "objective": "distance", "d6_scenario": "O2-variable-origin-k3-distance"},
+    {"id": "E24", "agents": 3, "origin": "optimized", "policy": "P1", "objective": "time", "d6_scenario": "O2-variable-origin-k3-time"},
+    {"id": "E25", "agents": 3, "origin": "optimized", "policy": "P2", "objective": "distance", "d6_scenario": "O2-variable-origin-k3-distance"},
+    {"id": "E26", "agents": 3, "origin": "optimized", "policy": "P2", "objective": "time", "d6_scenario": "O2-variable-origin-k3-time"},
+    {"id": "E27", "agents": 3, "origin": "optimized", "policy": "P3", "objective": "distance", "d6_scenario": "O2-variable-origin-k3-distance"},
+    {"id": "E28", "agents": 3, "origin": "optimized", "policy": "P3", "objective": "time", "d6_scenario": "O2-variable-origin-k3-time"}
+  ]
+}

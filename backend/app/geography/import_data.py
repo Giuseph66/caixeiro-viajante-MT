@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
+from app.core.memory_limit import enforce_memory_limit
 from app.geography.municipalities import (
     load_municipal_seats,
     load_municipality_catalog,
@@ -125,6 +127,9 @@ def import_osm_network_summary() -> dict[str, object]:
 
 
 def main() -> None:
+    enforce_memory_limit(
+        command=[sys.executable, "-m", "app.geography.import_data", *sys.argv[1:]]
+    )
     started = time.perf_counter()
     municipality_result = import_municipalities()
     osm_result = import_osm_network_summary()

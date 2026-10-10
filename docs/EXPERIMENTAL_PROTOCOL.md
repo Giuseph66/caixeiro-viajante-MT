@@ -1,7 +1,7 @@
 # Protocolo experimental
 
-**Estado:** plano pré-registrável; nenhum experimento executado.  
-**Regra:** não executar os 28 cenários antes de estimar CPU, RAM, disco e duração.
+**Estado:** configuração D9 congelada; orçamento registrado antes do lote; dez repetições iniciadas em 2026-10-10; análise pendente.
+**Regra:** conferir orçamento, RAM disponível e disco livre imediatamente antes do lote.
 
 ## Perguntas
 
@@ -39,11 +39,11 @@ Com lambda zero, P2 deve reproduzir baseline dentro das tolerâncias do solver; 
 
 ## Repetições e orçamento
 
-Planejar dez repetições por configuração heurística. Semente mestra 20261008; seed de repetição = 20261008 + índice. Permitir ajustar repetições. Registrar limite de tempo, threads, parâmetros, versão do solver e estado de interrupção.
+O protocolo executável está em `experiments/configurations/d9-mt.json`: dez repetições, ajustáveis por `--repetitions`; seed inicial 20261008, stride 10 e offsets 0/1/2 para D4/D5/D6. Cada runner grava seus limites, seeds, versões, hashes, status e artefatos no índice da repetição. Os cenários são E01–E28.
 
-O2 pode exigir até 142 origens por configuração. Antes da D9, medir instâncias de 5, 10, 20, 50 e 142 cidades, junto de nós/arestas da rede, RAM, duração e efeito do cache. Estimar orçamento dos cenários/repetições e então propor limites. Execução parcial permanece best-known, não completa/ótima.
+Limites congelados: 300 s por cenário D4/D5; 60 s por variante D6; oito processos no máximo; `MemoryMax=25.000.000.000` bytes para todo o processo de cálculo e seus workers. O2 usa os resultados medidos de 142 origens. P2 testa λ=0, 0,25, 0,5, 1 e 2 sobre o mesmo conjunto de candidatas; λ=1 é o principal. λ=0 é conferido contra P1 sem busca adicional.
 
-Nenhuma rota, matriz rodoviária, medição de desempenho ou orçamento foi gerado nesta Entrega 0.
+A estimativa reproduzível fica em `experiments/analysis/d9-budget-mt-2026-10-10.md`. Ela usa os tempos medidos D5 como referência, limites D4/D6 como teto, reserva 20% de duração e exige 2 GB livres para relatórios. Execução parcial permanece best-known, não completa/ótima.
 
 ## Dados e reprodutibilidade
 

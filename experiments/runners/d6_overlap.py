@@ -575,6 +575,10 @@ def _build_scenario_report(
         "objective": scenario["objective"],
         "vehicle_count": scenario["vehicle_count"],
         "candidate_solution_count": len(solutions),
+        "candidate_generation_wall_time_s": round(
+            sum(float(solution.get("wall_time_s", 0.0)) for solution in solutions),
+            3,
+        ),
         "candidate_route_pool_is_complete": False,
         "origins": origin_reports,
         "best_by_policy": {
@@ -684,6 +688,8 @@ def _main() -> None:
         "time_limit_s_per_variant": args.time_limit_s,
         "variants_per_scenario": args.variants,
         "seed": args.seed,
+        "lambdas": list(args.lambdas),
+        "reference_speed_kph": args.reference_speed_kph,
         "parallel_solver_processes": args.workers,
         "multiprocessing_start_method": "spawn",
     }

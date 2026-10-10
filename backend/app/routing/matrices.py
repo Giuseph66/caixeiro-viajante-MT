@@ -9,6 +9,7 @@ import os
 import platform
 import resource
 import shutil
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
@@ -20,6 +21,7 @@ from typing import Any
 
 from pyproj import Geod
 
+from app.core.memory_limit import enforce_memory_limit
 from app.graph.builder import PROJECT_ROOT, file_sha256
 from app.graph.network import RoadNetwork
 from app.shortest_path.fast import FastDijkstra, NativeSearchUnavailable
@@ -888,6 +890,9 @@ def build_and_persist_matrices(
 
 
 def main() -> None:
+    enforce_memory_limit(
+        command=[sys.executable, "-m", "app.routing.matrices", *sys.argv[1:]],
+    )
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--benchmark",

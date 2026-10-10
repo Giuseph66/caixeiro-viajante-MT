@@ -23,6 +23,7 @@ from app.optimization.visitation.tsp import TSP_ALGORITHM_VERSION, solve_open_ts
 from app.routing.matrices import MetricMatrix, SeatSnap
 
 CUIABA_IBGE_CODE = 5103403
+BASE_SEED = 20261008
 SCENARIOS = (
     ("O1-fixed-cuiaba-distance", "distance", CUIABA_IBGE_CODE),
     ("O1-fixed-cuiaba-time", "time", CUIABA_IBGE_CODE),
@@ -46,10 +47,31 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _route_metrics(
+    visit_order: tuple[int, ...],
+    seats: list[SeatSnap],
+    matrices: dict[str, MetricMatrix],
+) -> tuple[float, float]:
+    code_to_index = {seat.ibge_code: index for index, seat in enumerate(seats)}
+    distance_m = 0.0
+    travel_time_s = 0.0
+    for from_code, to_code in zip(visit_order, visit_order[1:], strict=False):
+        from_index = code_to_index[from_code]
+        to_index = code_to_index[to_code]
+        distance = matrices["distance"].costs[from_index][to_index]
+        travel_time = matrices["time"].costs[from_index][to_index]
+        if distance is None or travel_time is None:
+            raise ValueError("Rota D4 contém uma perna sem custo dirigido no cache D3")
+        distance_m += distance
+        travel_time_s += travel_time
+    return distance_m, travel_time_s
+
+
 def _main() -> None:
     run_started = perf_counter()
     parser = argparse.ArgumentParser(description="Executa cenários reais Open TSP D4.")
     parser.add_argument("--time-limit-s", type=float, default=300.0)
+    parser.add_argument("--seed", type=int, default=BASE_SEED)
     parser.add_argument("--verify-existing", action="store_true")
     parser.add_argument(
         "--cache-manifest",
@@ -64,6 +86,8 @@ def _main() -> None:
     args = parser.parse_args()
     if not math.isfinite(args.time_limit_s) or args.time_limit_s <= 0:
         parser.error("--time-limit-s deve ser positivo")
+    if not 0 <= args.seed <= 2**31 - len(SCENARIOS):
+        parser.error("--seed deve permitir seeds de cenário entre 0 e 2^31-1")
     source_path = args.cache_manifest.resolve()
     output_path = args.output.resolve()
     checkpoint_path = ROOT / "data/processed/tsp-d4-checkpoint.json"
@@ -81,6 +105,7 @@ def _main() -> None:
         "algorithm_version": TSP_ALGORITHM_VERSION,
         "algorithm_source_sha256": source_code_sha256,
         "time_limit_s_per_scenario": args.time_limit_s,
+        "seed": args.seed,
     }
 
     existing_report = None
@@ -143,6 +168,7 @@ def _main() -> None:
             flush=True,
         )
         started = perf_counter()
+        scenario_seed = args.seed + position - 1
         solution = solve_open_tsp(
             seats,
             matrices[metric],
@@ -150,9 +176,16 @@ def _main() -> None:
             objective=metric,
             time_limit_s=args.time_limit_s,
             prove_small_instances=False,
+            seed=scenario_seed,
+        )
+        distance_total_m, completion_time_s = _route_metrics(
+            solution.visit_order,
+            seats,
+            matrices,
         )
         result = {
             "scenario": scenario,
+            "seed": scenario_seed,
             "origin_policy": "fixed_cuiaba" if origin_code is not None else "optimized_among_all_seats",
             "status": solution.status,
             "method": solution.method,
@@ -169,6 +202,15 @@ def _main() -> None:
             "directed_edge_count": sum(len(leg.edge_ids) for leg in solution.legs),
             "runtime_s": solution.runtime_s,
             "wall_time_s": perf_counter() - started,
+            "distance_total_m": distance_total_m,
+            "distance_by_agent_m": [distance_total_m],
+            "max_agent_distance_m": distance_total_m,
+            "completion_time_s": completion_time_s,
+            "completion_time_by_agent_s": [completion_time_s],
+            "time_max_s": completion_time_s,
+            "municipalities_served": len(set(solution.visit_order)),
+            "municipalities_by_agent": [len(set(solution.visit_order))],
+            "overlap_distance_m": 0.0,
             "candidate_origins_evaluated": solution.candidates_evaluated,
             "solver_status_code": solution.solver_status,
         }
@@ -194,6 +236,7 @@ def _main() -> None:
         "algorithm": "OR-Tools RoutingModel with nearest-neighbor baseline and artificial open end",
         "configuration": {
             "time_limit_s_per_scenario": args.time_limit_s,
+            "seed": args.seed,
             "sequential_scenarios": True,
             "parallel_solver_processes": 1,
             "available_logical_cpus": os.cpu_count(),

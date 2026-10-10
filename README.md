@@ -20,6 +20,18 @@ Com o grafo D3.1 gerado, calcule as matrizes direcionadas de distância e tempo:
 
 O cálculo usa acelerador C++ compilado localmente (`g++`), imprime progresso por origem e grava checkpoints que são reutilizados se a execução for interrompida. Sem `g++`, usa a implementação Python de referência. Para executar os benchmarks de 5, 10, 20, 50 e 142 sedes, acrescente `--benchmark`.
 
+Importação OSM, construção do grafo, matrizes e runners D4–D6 abrem uma unidade `systemd-run --user` própria com limite rígido de 25.000.000.000 bytes antes de carregar dados grandes. Workers ficam no mesmo cgroup; se o limite não puder ser aplicado, o cálculo para antes de iniciar.
+
+## Reproduzir a D9
+
+Com os manifestos D3–D6 presentes, registre primeiro o orçamento e então execute as dez repetições configuradas:
+
+    .venv/bin/python experiments/runners/d9_repeated_experiments.py
+    .venv/bin/python experiments/runners/d9_repeated_experiments.py --run
+    .venv/bin/python experiments/analysis/d9_analysis.py
+
+O primeiro comando apenas estima CPU, RAM, duração, disco e hash da configuração. O runner aplica teto de RAM de 25 GB e grava checkpoints e relatórios por repetição em `experiments/results/`; a análise grava métricas e estatísticas em `experiments/analysis/`. Consulte o [protocolo experimental](docs/EXPERIMENTAL_PROTOCOL.md) e o [orçamento D9](experiments/analysis/d9-budget-mt-2026-10-10.md).
+
 ## Iniciar
 
 Backend:
@@ -31,9 +43,11 @@ Backend:
 Frontend, em outro terminal:
 
     cd frontend
+    npm ci
     npm run dev
 
 API inicial: http://127.0.0.1:8000/api/health. A documentação OpenAPI fica em http://127.0.0.1:8000/docs.
+Frontend: http://127.0.0.1:5173. A tela permite iniciar e acompanhar jobs, cancelar, visualizar rotas rodoviárias reais, comparar execuções e exportar resultados em JSON.
 
 O endpoint de saúde confirma somente que a API está em execução; o banco não é verificado por ele. Para a primeira migração, configure DATABASE_URL e execute o comando na documentação de instalação.
 
@@ -46,5 +60,5 @@ O endpoint de saúde confirma somente que a API está em execução; o banco nã
 - [Protocolo experimental](docs/EXPERIMENTAL_PROTOCOL.md)
 - [Decisões técnicas](docs/TECHNICAL_DECISIONS.md)
 
-Dados rodoviários, matrizes e experimentos só serão adicionados nas entregas correspondentes, com fonte, versão, licença e hash documentados.
+Dados rodoviários, matrizes e experimentos usam manifestos com fonte, versão, licença e hashes. Consulte [entregas](docs/DELIVERABLES.md) para o estado e os limites de cada resultado.
 # caixeiro-viajante-MT

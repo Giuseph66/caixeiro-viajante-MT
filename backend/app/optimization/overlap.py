@@ -6,6 +6,7 @@ from typing import Literal, Mapping, Sequence
 
 OverlapPolicy = Literal["P1", "P2", "P3"]
 RoutingObjective = Literal["distance", "time"]
+OVERLAP_ALGORITHM_VERSION = "route-pool-overlap-v1"
 
 
 @dataclass(frozen=True, slots=True)
