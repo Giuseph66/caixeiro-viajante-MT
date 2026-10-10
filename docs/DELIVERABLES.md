@@ -54,6 +54,23 @@ Cinco testes sintéticos passaram. Quatro cenários reais foram calculados e aud
 
 Runner reproduzível: `experiments/runners/d4_open_tsp.py`. Os quatro cenários executaram em sequência, 300 s de busca por cenário, dentro de cgroup limitado a 25.000.000.000 bytes; pico cgroup observado 16.809.508.864 bytes. Revalidação do relatório também exige o mesmo teto. O processamento paralelo de matrizes D3 continua em 8 workers; TSP usou um solver por vez para manter o limite de RAM.
 
+## Estado da D5 em 2026-10-10
+
+D5.1–D5.3 concluídas em `backend/app/optimization/visitation/mtsp.py`: mTSP aberto com k=2/3, origem O1 fixa ou O2 variável, objetivos de distância total ou tempo máximo, baseline balanceada e service time configurável. Os 7 testes focados passaram; suíte backend: 33 passaram. Os 8 cenários reais atenderam cada uma das 142 sedes exatamente uma vez, ativaram todos os agentes e tiveram caminhos abertos validados contra 186.439 IDs de aresta física do grafo.
+
+| Cenário | Origem IBGE | Distância total | Tempo máximo |
+|---|---:|---:|---:|
+| O1 k=2 distância | 5103403 | 10.020,7 km | 87,40 h |
+| O1 k=2 tempo | 5103403 | 13.324,4 km | 92,94 h |
+| O1 k=3 distância | 5103403 | 9.938,1 km | 87,74 h |
+| O1 k=3 tempo | 5103403 | 12.122,2 km | 56,13 h |
+| O2 k=2 distância | 5103437 | 10.266,4 km | 131,02 h |
+| O2 k=2 tempo | 5105150 | 12.759,5 km | 88,82 h |
+| O2 k=3 distância | 5107198 | 10.122,6 km | 108,30 h |
+| O2 k=3 tempo | 5107305 | 13.353,3 km | 61,33 h |
+
+Todos os resultados reais são `feasible`, sem prova de ótimo. O2 avaliou as 142 origens por cenário dentro de um limite compartilhado de 300 s. Execução reproduzível: `.venv/bin/python experiments/runners/d5_open_mtsp.py --time-limit-s 300 --workers 8 --output data/processed/mtsp-d5-reproduction.json`. Com 8 processos em 8 CPUs, levou 430,778 s; o cgroup limitou memória a 24.999.997.440 bytes e observou pico de 15.284.240.384 bytes. Manifesto completo, rotas, IDs e métricas: `data/manifests/mtsp-benchmarks-mt.json`.
+
 ## Portões de aceite
 
 - D1: ambiente reproduzível e dependências compatíveis antes da ingestão.

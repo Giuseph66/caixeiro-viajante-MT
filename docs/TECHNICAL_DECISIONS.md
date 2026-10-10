@@ -10,7 +10,7 @@
 | TD-04 | IBGE API e código IBGE como chave municipal | Confirmada no snapshot | Em 2026-10-08, UF 51 retornou 142 IDs únicos; hash SHA-256 do JSON descompactado: 6a5506b41f96b2aa1dbab29a85c235d8550dfef95a484d37605db23a9645a9e4 |
 | TD-05 | Coordenadas de sede de Localidades do Brasil, categoria/subcategoria de sede | Confirmada na D2 | 142 pontos `Cidade / Sede Municipal`, chaveados por `CD_MUN`; origem EPSG:4674, GeoJSON EPSG:4326; nunca usar centroide municipal |
 | TD-06 | Snapshot OSM nacional PBF com hash/licença | Confirmada na D2 | `brazil-261007.osm.pbf`, 2.091.690.432 bytes; ODbL 1.0; checksum e relatório em `data/manifests/osm-brazil-261007.json` |
-| TD-07 | OR-Tools para open TSP/mTSP; fim artificial sem custo físico | Proposta | API aceita starts/ends próprios; sem retorno à origem |
+| TD-07 | OR-Tools para open TSP/mTSP; fim artificial sem custo físico | Implementada e medida em D4/D5 | API aceita starts/ends próprios; sem retorno à origem; resultados reais de 142 cidades são viáveis, sem prova de ótimo |
 | TD-08 | Dijkstra referência, A* com heurística admissível; matrizes separadas | Implementada no código D3; sem validação executada | A* usa distância geodésica e velocidade máxima modelada como limites inferiores |
 | TD-09 | Guardar ID físico e trajetória completa | Proposta crítica | P2/P3 requerem validação por segmento; distinguir sentidos e pistas |
 | TD-10 | P1 sobre custos base; P2/P3 com caminho e visitação conjuntos | Proposta | Compartilhamento global não está codificado por matriz estática simples |
@@ -28,6 +28,7 @@
 | TD-22 | Conversões automotivas via nó suportadas; via-ways/condicionais registradas como não suportadas | Implementada no código D3; sem validação executada | Evita apresentar cobertura parcial de restrições como cobertura total |
 | TD-23 | Tempo: maxspeed numérico; sem isso, velocidade por classe configurada | Provisória | Estimativa modelada; limitações ficam no manifesto; não representa tráfego observado |
 | TD-24 | Índice temporário sparse_file_array do PyOsmium durante o parse nacional | Implementada no código D3; sem medição | Mantém localizações fora do grafo em disco e limita cópia de todos os nós na RAM; custo de I/O será medido |
+| TD-25 | Teto rígido de 25 GB e processos `spawn` nos experimentos paralelos | Implementada e medida em D4/D5 | Runner aplica cgroup `MemoryMax`; workers recebem matrizes de custos sem trajetórias completas; pico D5 de 15.284.240.384 bytes |
 
 ## P2
 
