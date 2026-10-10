@@ -13,6 +13,9 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from memory_limit import enforce_memory_limit
+
+MEMORY_LIMIT = enforce_memory_limit()
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
@@ -26,7 +29,6 @@ SCENARIOS = (
     ("O2-variable-origin-distance", "distance", None),
     ("O2-variable-origin-time", "time", None),
 )
-MAX_MEMORY_BYTES = 25_000_000_000
 
 
 def _sha256(path: Path) -> str:
@@ -42,21 +44,6 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     temporary.replace(path)
-
-
-def _memory_limit_bytes() -> int:
-    cgroup = Path(Path("/proc/self/cgroup").read_text().strip().split("::")[-1].lstrip("/"))
-    limit_path = Path("/sys/fs/cgroup") / cgroup / "memory.max"
-    value = limit_path.read_text().strip()
-    if not value.isdecimal():
-        raise RuntimeError("Runner exige cgroup v2 com teto de memória ativo")
-    limit = int(value)
-    if limit > MAX_MEMORY_BYTES:
-        raise RuntimeError(
-            "Runner exige teto <= 25 GB; inicie com systemd-run --user --scope "
-            "-p MemoryMax=25000000000"
-        )
-    return limit
 
 
 def _main() -> None:
@@ -77,8 +64,6 @@ def _main() -> None:
     args = parser.parse_args()
     if not math.isfinite(args.time_limit_s) or args.time_limit_s <= 0:
         parser.error("--time-limit-s deve ser positivo")
-    memory_limit = _memory_limit_bytes()
-
     source_path = args.cache_manifest.resolve()
     output_path = args.output.resolve()
     checkpoint_path = ROOT / "data/processed/tsp-d4-checkpoint.json"
@@ -212,7 +197,7 @@ def _main() -> None:
             "sequential_scenarios": True,
             "parallel_solver_processes": 1,
             "available_logical_cpus": os.cpu_count(),
-            "memory_limit_bytes": memory_limit,
+            "memory_limit_bytes": MEMORY_LIMIT,
             "peak_rss_mib": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1),
             "elapsed_s": round(perf_counter() - run_started, 3),
         },
