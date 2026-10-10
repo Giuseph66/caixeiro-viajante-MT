@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import app.routing.matrices as matrices_module
 from app.graph.network import RoadEdge, RoadNetwork, RoadNode
 from app.routing.matrices import (
     SeatSnap,
@@ -46,6 +47,48 @@ def test_matrix_keeps_directed_costs_and_edge_paths() -> None:
     assert matrix.costs == [[0.0, 123.0], [None, 0.0]]
     assert matrix.paths == [[[], ["one-way"]], [None, []]]
     assert matrix.unreachable_directed_pairs == 1
+
+
+def test_completed_matrix_rows_resume_from_checkpoints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = RoadNetwork(
+        {
+            1: RoadNode(1, -56.0, -15.0),
+            2: RoadNode(2, -55.999, -15.0),
+        },
+        {
+            "one-way": RoadEdge(
+                "one-way", 1, 2, 7, "physical", 123.0, 12.0, "primary", 36.9, "test"
+            )
+        },
+    )
+    snaps = [
+        SeatSnap(5100102, "Acorizal", -56.0, -15.0, 1, 0.0, True),
+        SeatSnap(5100201, "Água Boa", -55.999, -15.0, 2, 0.0, True),
+    ]
+    computed = build_metric_matrix(
+        graph,
+        snaps,
+        "distance",
+        checkpoint_dir=tmp_path / "distance",
+        checkpoint_key="test-cache-key",
+    )
+
+    def unexpected_search(*args: object, **kwargs: object) -> object:
+        raise AssertionError("linha concluída deveria vir do checkpoint")
+
+    monkeypatch.setattr(matrices_module, "all_reachable_targets", unexpected_search)
+    resumed = build_metric_matrix(
+        graph,
+        snaps,
+        "distance",
+        checkpoint_dir=tmp_path / "distance",
+        checkpoint_key="test-cache-key",
+    )
+
+    assert resumed == computed
 
 
 def test_cache_key_changes_with_graph_and_snap_assignment() -> None:

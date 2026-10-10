@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import shutil
+
+import pytest
+
 from app.graph.network import RoadEdge, RoadNetwork, RoadNode, TurnRestriction
-from app.shortest_path.search import astar, dijkstra
+from app.shortest_path.fast import FastDijkstra
+from app.shortest_path.search import all_reachable_targets, astar, dijkstra
 
 
 def _edge(
@@ -96,3 +101,37 @@ def test_same_node_path_has_zero_cost_and_no_edges() -> None:
     assert result.cost == 0.0
     assert result.node_ids == (1,)
     assert result.edge_ids == ()
+
+
+@pytest.mark.skipif(shutil.which("g++") is None, reason="g++ indisponível")
+def test_native_dijkstra_matches_reference_with_turn_restriction() -> None:
+    graph = RoadNetwork(
+        {
+            1: RoadNode(1, -56.0, -15.0),
+            2: RoadNode(2, -55.99995, -15.0),
+            3: RoadNode(3, -55.9999, -15.0),
+            4: RoadNode(4, -55.99995, -14.99995),
+        },
+        {
+            "first": _edge("first", 1, 2, 10, 10.0, 1.0),
+            "blocked": _edge("blocked", 2, 3, 20, 10.0, 1.0),
+            "alternate-a": _edge("alternate-a", 2, 4, 30, 15.0, 1.5),
+            "alternate-b": _edge("alternate-b", 4, 3, 40, 15.0, 1.5),
+            "reverse": _edge("reverse", 3, 2, 20, 10.0, 1.0),
+        },
+        (
+            TurnRestriction(10, 2, 20, "no"),
+            TurnRestriction(30, 4, 40, "only"),
+        ),
+    )
+    targets = [1, 2, 3, 4]
+    engine = FastDijkstra.from_network(graph, set(targets))
+
+    for metric in ("distance", "time"):
+        for source in targets:
+            expected = all_reachable_targets(graph, source, set(targets), metric)
+            costs, paths = engine.search_source(source, targets, metric)
+            for index, target in enumerate(targets):
+                reference = expected.get(target)
+                assert costs[index] == (reference.cost if reference else None)
+                assert paths[index] == (list(reference.edge_ids) if reference else None)

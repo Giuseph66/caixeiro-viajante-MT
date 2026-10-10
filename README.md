@@ -1,4 +1,4 @@
-Plataforma de pesquisa para planejar rotas rodoviárias abertas entre as sedes dos municípios de Mato Grosso, com um a três agentes. D2 contém 142 municípios, sedes oficiais do IBGE e snapshot nacional OSM. Código D3 para grafo, caminhos e matrizes existe; processamento real aguarda confirmação para comandos longos.
+Plataforma de pesquisa para planejar rotas rodoviárias abertas entre as sedes dos municípios de Mato Grosso, com um a três agentes. D2 contém 142 municípios, sedes oficiais do IBGE e snapshot nacional OSM. D3 gera o grafo direcionado e matrizes a partir dos dados locais fixados por manifesto.
 
 
 ## Ambiente local
@@ -10,6 +10,15 @@ Plataforma de pesquisa para planejar rotas rodoviárias abertas entre as sedes d
 Veja [instalação nativa no Linux](docs/INSTALLATION_LINUX.md) para criar o ambiente Python, instalar pacotes locais, configurar o banco e executar os serviços.
 
 Consulte o [relatório de qualidade D2](docs/DATA_QUALITY_D2.md) para fontes, hashes, validações e limites dos dados atuais.
+
+## Processamento D3
+
+Com o grafo D3.1 gerado, calcule as matrizes direcionadas de distância e tempo:
+
+    cd backend
+    ../.venv/bin/python -m app.routing.matrices --workers 8
+
+O cálculo usa acelerador C++ compilado localmente (`g++`), imprime progresso por origem e grava checkpoints que são reutilizados se a execução for interrompida. Sem `g++`, usa a implementação Python de referência. Para executar os benchmarks de 5, 10, 20, 50 e 142 sedes, acrescente `--benchmark`.
 
 ## Iniciar
 

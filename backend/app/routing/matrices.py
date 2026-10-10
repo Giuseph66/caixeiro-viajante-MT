@@ -5,8 +5,12 @@ import gc
 import gzip
 import json
 import math
+import os
 import platform
 import resource
+import shutil
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -18,12 +22,13 @@ from pyproj import Geod
 
 from app.graph.builder import PROJECT_ROOT, file_sha256
 from app.graph.network import RoadNetwork
-from app.shortest_path.search import PathMetric, RoadPath, all_reachable_targets
+from app.shortest_path.fast import FastDijkstra, NativeSearchUnavailable
+from app.shortest_path.search import PathMetric, all_reachable_targets
 
 GEOD = Geod(ellps="WGS84")
 SNAP_GRID_DEGREES = 0.02
 SNAP_WARNING_DISTANCE_M = 10_000.0
-MATRIX_ALGORITHM_VERSION = "dijkstra-directed-v1"
+MATRIX_ALGORITHM_VERSION = "dijkstra-directed-v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +52,75 @@ class MetricMatrix:
     @property
     def unreachable_directed_pairs(self) -> int:
         return sum(cost is None for row in self.costs for cost in row)
+
+
+def _read_matrix_row_checkpoint(
+    path: Path,
+    *,
+    cache_key: str,
+    metric: PathMetric,
+    source_ibge_code: int,
+    target_count: int,
+) -> tuple[list[float | None], list[list[str] | None]] | None:
+    if not path.is_file():
+        return None
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as source:
+            payload = json.load(source)
+        costs = payload["costs"]
+        paths = payload["paths"]
+        if (
+            payload.get("cache_key") != cache_key
+            or payload.get("metric") != metric
+            or payload.get("source_ibge_code") != source_ibge_code
+            or not isinstance(costs, list)
+            or not isinstance(paths, list)
+            or len(costs) != target_count
+            or len(paths) != target_count
+        ):
+            return None
+        for cost, edge_ids in zip(costs, paths, strict=True):
+            if cost is None:
+                if edge_ids is not None:
+                    return None
+            elif (
+                isinstance(cost, bool)
+                or not isinstance(cost, (int, float))
+                or not math.isfinite(cost)
+                or cost < 0
+                or not isinstance(edge_ids, list)
+                or any(not isinstance(edge_id, str) for edge_id in edge_ids)
+            ):
+                return None
+        return costs, paths
+    except (OSError, EOFError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _write_matrix_row_checkpoint(
+    path: Path,
+    *,
+    cache_key: str,
+    metric: PathMetric,
+    source_ibge_code: int,
+    costs: list[float | None],
+    paths: list[list[str] | None],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    payload = {
+        "cache_key": cache_key,
+        "metric": metric,
+        "source_ibge_code": source_ibge_code,
+        "costs": costs,
+        "paths": paths,
+    }
+    with temporary.open("wb") as raw:
+        with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed:
+            compressed.write(
+                json.dumps(payload, separators=(",", ":"), allow_nan=False).encode()
+            )
+    temporary.replace(path)
 
 
 def _distance_m(longitude_a: float, latitude_a: float, longitude_b: float, latitude_b: float) -> float:
@@ -178,13 +252,6 @@ def snap_seats(
     return sorted(result, key=lambda snap: snap.ibge_code)
 
 
-def _path_for_cost(
-    paths: dict[int, RoadPath],
-    destination: int,
-) -> RoadPath | None:
-    return paths.get(destination)
-
-
 def _unreachable_seats(
     costs: list[list[float | None]],
     snaps: list[SeatSnap],
@@ -223,28 +290,139 @@ def build_metric_matrix(
     network: RoadNetwork,
     snaps: list[SeatSnap],
     metric: PathMetric,
+    *,
+    engine: FastDijkstra | None = None,
+    workers: int | None = None,
+    checkpoint_dir: Path | None = None,
+    checkpoint_key: str | None = None,
+    progress: bool = False,
+    progress_label: str | None = None,
 ) -> MetricMatrix:
     if metric not in {"distance", "time"}:
         raise ValueError(f"Métrica desconhecida: {metric}")
-    node_ids = [snap.node_id for snap in snaps]
-    target_nodes = set(node_ids)
-    costs: list[list[float | None]] = []
-    paths: list[list[list[str] | None]] = []
-    for source in node_ids:
-        reachable = all_reachable_targets(network, source, target_nodes, metric)
-        cost_row: list[float | None] = []
-        path_row: list[list[str] | None] = []
-        for destination in node_ids:
-            result = _path_for_cost(reachable, destination)
-            cost_row.append(result.cost if result else None)
-            path_row.append(list(result.edge_ids) if result else None)
-        costs.append(cost_row)
-        paths.append(path_row)
+    if not snaps:
+        raise ValueError("A matriz requer pelo menos uma sede")
+    unique_target_nodes = list(dict.fromkeys(snap.node_id for snap in snaps))
+    target_index = {node_id: index for index, node_id in enumerate(unique_target_nodes)}
+    row_costs: list[list[float | None] | None] = [None] * len(snaps)
+    row_paths: list[list[list[str] | None] | None] = [None] * len(snaps)
+    pending: list[int] = []
+
+    if checkpoint_dir is not None:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    for source_index, snap in enumerate(snaps):
+        checkpoint_path = (
+            checkpoint_dir / f"{snap.ibge_code}.json.gz"
+            if checkpoint_dir is not None
+            else None
+        )
+        cached_row = (
+            _read_matrix_row_checkpoint(
+                checkpoint_path,
+                cache_key=checkpoint_key,
+                metric=metric,
+                source_ibge_code=snap.ibge_code,
+                target_count=len(snaps),
+            )
+            if checkpoint_path is not None and checkpoint_key is not None
+            else None
+        )
+        if cached_row is None:
+            pending.append(source_index)
+        else:
+            row_costs[source_index], row_paths[source_index] = cached_row
+
+    worker_count = (
+        max(1, min(workers or (os.cpu_count() or 1), len(pending)))
+        if pending and engine is not None
+        else (1 if pending else 0)
+    )
+    label = progress_label or f"Matriz {metric}"
+    started_at = time.perf_counter()
+    completed = len(snaps) - len(pending)
+    if progress:
+        print(
+            f"{label}: {completed}/{len(snaps)} origens recuperadas; "
+            f"{len(pending)} pendentes; {worker_count} worker(s)",
+            flush=True,
+        )
+
+    def compute_row(source_index: int) -> tuple[list[float | None], list[list[str] | None]]:
+        source = snaps[source_index].node_id
+        if engine is not None:
+            unique_costs, unique_paths = engine.search_source(
+                source,
+                unique_target_nodes,
+                metric,
+            )
+        else:
+            reachable = all_reachable_targets(
+                network,
+                source,
+                set(unique_target_nodes),
+                metric,
+            )
+            unique_costs = [
+                reachable[node_id].cost if node_id in reachable else None
+                for node_id in unique_target_nodes
+            ]
+            unique_paths = [
+                list(reachable[node_id].edge_ids) if node_id in reachable else None
+                for node_id in unique_target_nodes
+            ]
+        return (
+            [unique_costs[target_index[snap.node_id]] for snap in snaps],
+            [unique_paths[target_index[snap.node_id]] for snap in snaps],
+        )
+
+    def keep_row(source_index: int, costs: list[float | None], paths: list[list[str] | None]) -> None:
+        row_costs[source_index] = costs
+        row_paths[source_index] = paths
+        if checkpoint_dir is not None and checkpoint_key is not None:
+            _write_matrix_row_checkpoint(
+                checkpoint_dir / f"{snaps[source_index].ibge_code}.json.gz",
+                cache_key=checkpoint_key,
+                metric=metric,
+                source_ibge_code=snaps[source_index].ibge_code,
+                costs=costs,
+                paths=paths,
+            )
+
+    def report_progress() -> None:
+        if not progress:
+            return
+        elapsed = time.perf_counter() - started_at
+        remaining = (elapsed / completed * (len(snaps) - completed)) if completed else 0.0
+        print(
+            f"{label}: {completed}/{len(snaps)} origens "
+            f"({completed / len(snaps):.0%}); {elapsed:.0f}s decorridos, "
+            f"ETA ~{remaining:.0f}s",
+            flush=True,
+        )
+
+    if engine is not None and worker_count > 1 and len(pending) > 1:
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="mt-dijkstra") as pool:
+            futures = {pool.submit(compute_row, index): index for index in pending}
+            for future in as_completed(futures):
+                source_index = futures[future]
+                costs, paths = future.result()
+                keep_row(source_index, costs, paths)
+                completed += 1
+                report_progress()
+    else:
+        for source_index in pending:
+            costs, paths = compute_row(source_index)
+            keep_row(source_index, costs, paths)
+            completed += 1
+            report_progress()
+
+    if any(row is None for row in row_costs) or any(row is None for row in row_paths):
+        raise RuntimeError(f"Matriz {metric} terminou com linhas ausentes")
     return MetricMatrix(
         metric=metric,
         unit="m" if metric == "distance" else "s",
-        costs=costs,
-        paths=paths,
+        costs=[row for row in row_costs if row is not None],
+        paths=[row for row in row_paths if row is not None],
     )
 
 
@@ -413,10 +591,37 @@ def _validate_matrix_cache(
 def _build_metric_pair(
     network: RoadNetwork,
     snaps: list[SeatSnap],
+    *,
+    engine: FastDijkstra | None = None,
+    workers: int | None = None,
+    checkpoint_dir: Path | None = None,
+    checkpoint_key: str | None = None,
+    progress: bool = False,
+    progress_label: str = "Matriz",
 ) -> tuple[MetricMatrix, MetricMatrix]:
     return (
-        build_metric_matrix(network, snaps, "distance"),
-        build_metric_matrix(network, snaps, "time"),
+        build_metric_matrix(
+            network,
+            snaps,
+            "distance",
+            engine=engine,
+            workers=workers,
+            checkpoint_dir=checkpoint_dir / "distance" if checkpoint_dir else None,
+            checkpoint_key=checkpoint_key,
+            progress=progress,
+            progress_label=f"{progress_label} · distância",
+        ),
+        build_metric_matrix(
+            network,
+            snaps,
+            "time",
+            engine=engine,
+            workers=workers,
+            checkpoint_dir=checkpoint_dir / "time" if checkpoint_dir else None,
+            checkpoint_key=checkpoint_key,
+            progress=progress,
+            progress_label=f"{progress_label} · tempo",
+        ),
     )
 
 
@@ -429,7 +634,12 @@ def _code_order_spaced_snaps(snaps: list[SeatSnap], count: int) -> list[SeatSnap
     return [snaps[index] for index in indexes]
 
 
-def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
+def build_and_persist_matrices(
+    *,
+    benchmark: bool = False,
+    workers: int | None = None,
+    progress: bool = True,
+) -> dict[str, object]:
     graph_manifest_path = PROJECT_ROOT / "data/manifests/road-network-mt.json"
     graph_manifest = json.loads(graph_manifest_path.read_text(encoding="utf-8"))
     seat_manifest_path = PROJECT_ROOT / "data/manifests/municipalities-mt.json"
@@ -444,6 +654,8 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
     actual_graph_sha256 = file_sha256(graph_path)
     if actual_graph_sha256 != graph_manifest["graph_sha256"]:
         raise ValueError("Hash do grafo diverge do manifesto D3.1")
+    if progress:
+        print("Carregando grafo viário para matrizes...", flush=True)
     network = RoadNetwork.from_jsonl_gz(graph_path)
     seats_payload = json.loads(seats_path.read_text(encoding="utf-8"))
     snaps = snap_seats(seats_payload["features"], network)
@@ -453,6 +665,23 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
     cache_path = PROJECT_ROOT / f"data/matrices/{cache_key}.json.gz"
     cache_manifest_path = PROJECT_ROOT / "data/manifests/travel-matrix-mt.json"
     started_at = perf_counter()
+    worker_count = max(1, workers or (os.cpu_count() or 1))
+    engine: FastDijkstra | None = None
+    engine_name = "cached"
+    checkpoint_dirs: set[Path] = set()
+
+    if benchmark or not cache_path.exists():
+        try:
+            if progress:
+                print("Preparando arrays compactos e compilando Dijkstra C++...", flush=True)
+            engine = FastDijkstra.from_network(network, {snap.node_id for snap in snaps})
+            engine_name = "native-cpp"
+            worker_count = min(worker_count, len(snaps))
+        except NativeSearchUnavailable as error:
+            engine_name = "python-reference"
+            worker_count = 1
+            if progress:
+                print(f"Acelerador indisponível ({error}); usando Dijkstra Python.", flush=True)
 
     benchmark_results: list[dict[str, object]] = []
     if benchmark:
@@ -460,14 +689,35 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
         travel_time: MetricMatrix | None = None
         for size in (5, 10, 20, 50, len(snaps)):
             subset = _code_order_spaced_snaps(snaps, size)
+            subset_key = matrix_cache_key(actual_graph_sha256, subset, speed_profile)
+            subset_checkpoint_dir = PROJECT_ROOT / f"data/matrices/.work-{subset_key}"
+            checkpoint_dirs.add(subset_checkpoint_dir)
+            checkpoint_rows_reused = sum(
+                (subset_checkpoint_dir / metric / f"{snap.ibge_code}.json.gz").is_file()
+                for metric in ("distance", "time")
+                for snap in subset
+            )
             phase_started = perf_counter()
-            distance, travel_time = _build_metric_pair(network, subset)
+            distance, travel_time = _build_metric_pair(
+                network,
+                subset,
+                engine=engine,
+                workers=worker_count,
+                checkpoint_dir=subset_checkpoint_dir,
+                checkpoint_key=subset_key,
+                progress=progress,
+                progress_label=f"Benchmark {size}/{len(snaps)} sedes",
+            )
             benchmark_results.append(
                 {
                     "municipality_count": size,
                     "municipality_codes": [snap.ibge_code for snap in subset],
                     "graph_node_count": len(network.nodes),
                     "graph_directed_edge_count": len(network.edges),
+                    "engine": engine_name,
+                    "worker_count": min(worker_count, size) if engine else 1,
+                    "checkpoint_rows_reused": checkpoint_rows_reused,
+                    "timing_valid": checkpoint_rows_reused == 0,
                     "elapsed_seconds": round(perf_counter() - phase_started, 3),
                     "process_peak_rss_mib": round(
                         resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
@@ -528,6 +778,9 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
                     "runtime_environment": {
                         "python_version": platform.python_version(),
                         "platform": platform.platform(),
+                        "engine": engine_name,
+                        "worker_count": worker_count,
+                        "native_compiler": engine.compiler_details if engine else None,
                     },
                     "benchmarks": benchmark_results,
                     "process_peak_rss_note": (
@@ -559,7 +812,18 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
         distance_reachability = _unreachable_seats(cached["distance"]["costs"], snaps)
         time_reachability = _unreachable_seats(cached["time"]["costs"], snaps)
     else:
-        distance, travel_time = _build_metric_pair(network, snaps)
+        checkpoint_dir = PROJECT_ROOT / f"data/matrices/.work-{cache_key}"
+        checkpoint_dirs.add(checkpoint_dir)
+        distance, travel_time = _build_metric_pair(
+            network,
+            snaps,
+            engine=engine,
+            workers=worker_count,
+            checkpoint_dir=checkpoint_dir,
+            checkpoint_key=cache_key,
+            progress=progress,
+            progress_label=f"Matriz completa ({len(snaps)} sedes)",
+        )
         _write_matrix_cache(
             cache_path,
             cache_key,
@@ -600,6 +864,9 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
         "cache_path": str(cache_path.relative_to(PROJECT_ROOT)),
         "cache_sha256": file_sha256(cache_path),
         "cache_hit": cache_hit,
+        "routing_engine": engine_name,
+        "worker_count": worker_count if engine_name != "cached" else 0,
+        "native_compiler": engine.compiler_details if engine else None,
         "municipality_count": len(snaps),
         "distance": {"unit": "m", "unreachable_directed_pairs": distance_unreachable},
         "time": {"unit": "s", "unreachable_directed_pairs": time_unreachable},
@@ -615,6 +882,8 @@ def build_and_persist_matrices(*, benchmark: bool = False) -> dict[str, object]:
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    for checkpoint_dir in checkpoint_dirs:
+        shutil.rmtree(checkpoint_dir, ignore_errors=True)
     return manifest
 
 
@@ -623,10 +892,22 @@ def main() -> None:
     parser.add_argument(
         "--benchmark",
         action="store_true",
-        help="Enable benchmark mode; requires separate resource approval.",
+        help="Run scoped matrix benchmarks for 5, 10, 20, 50, and all seats.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=os.cpu_count() or 1,
+        help="Parallel native Dijkstra workers (default: logical CPU count).",
     )
     args = parser.parse_args()
-    print(json.dumps(build_and_persist_matrices(benchmark=args.benchmark), ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            build_and_persist_matrices(benchmark=args.benchmark, workers=args.workers),
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":
