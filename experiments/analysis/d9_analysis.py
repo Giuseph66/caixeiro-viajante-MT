@@ -392,7 +392,8 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         path.write_text("\n", encoding="utf-8")
         return
     with path.open("w", newline="", encoding="utf-8") as target:
-        writer = csv.DictWriter(target, fieldnames=list(rows[0]))
+        fieldnames = list(dict.fromkeys(key for row in rows for key in row))
+        writer = csv.DictWriter(target, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
             writer.writerow(
