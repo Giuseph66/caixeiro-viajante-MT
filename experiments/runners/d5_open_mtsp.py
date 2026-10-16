@@ -29,6 +29,8 @@ from app.optimization.visitation.mtsp import (  # noqa: E402
     solve_open_mtsp,
 )
 from app.routing.matrices import MetricMatrix, SeatSnap  # noqa: E402
+from app.optimization.repetition import REPETITION_ALGORITHM_VERSION  # noqa: E402
+from route_repetition import apply_repetition_rule, load_physical_edges
 
 CUIABA_IBGE_CODE = 5103403
 BASE_SEED = 20261008
@@ -50,7 +52,21 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-def _scenarios() -> tuple[tuple[str, int, str, int | None], ...]:
+def _scenarios(
+    vehicle_count: int | None = None,
+    objective: str | None = None,
+    origin_mode: str | None = None,
+    origin_ibge_code: int | None = None,
+) -> tuple[tuple[str, int, str, int | None], ...]:
+    origins = (
+        ((f"O1-fixed-{origin_ibge_code}", origin_ibge_code),)
+        if origin_mode == "fixed"
+        else (("O2-variable-origin", None),)
+        if origin_mode == "auto"
+        else (("O1-fixed-cuiaba", CUIABA_IBGE_CODE), ("O2-variable-origin", None))
+    )
+    vehicle_counts = (vehicle_count,) if vehicle_count is not None else (2, 3)
+    objectives = (objective,) if objective is not None else ("distance", "time")
     return tuple(
         (
             f"{origin_label}-k{vehicle_count}-{objective}",
@@ -58,12 +74,9 @@ def _scenarios() -> tuple[tuple[str, int, str, int | None], ...]:
             objective,
             origin_code,
         )
-        for origin_label, origin_code in (
-            ("O1-fixed-cuiaba", CUIABA_IBGE_CODE),
-            ("O2-variable-origin", None),
-        )
-        for vehicle_count in (2, 3)
-        for objective in ("distance", "time")
+        for origin_label, origin_code in origins
+        for vehicle_count in vehicle_counts
+        for objective in objectives
     )
 
 
@@ -335,7 +348,7 @@ def _finalize_scenario(
     )
     if not math.isclose(
         objective_value,
-        scenario["objective_value"],
+        scenario.get("base_objective_value", scenario["objective_value"]),
         rel_tol=1e-9,
         abs_tol=TOLERANCE,
     ):
@@ -354,12 +367,19 @@ def _finalize_scenario(
 
 
 def _main() -> None:
+    run_started = perf_counter()
     parser = argparse.ArgumentParser(
         description="Executa cenários reais open mTSP D5 com teto de RAM de 25 GB."
     )
     parser.add_argument("--time-limit-s", type=float, default=300.0)
     parser.add_argument("--seed", type=int, default=BASE_SEED)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--objective", choices=("distance", "time"))
+    parser.add_argument("--vehicle-count", type=int, choices=(2, 3))
+    parser.add_argument("--origin-mode", choices=("auto", "fixed"))
+    parser.add_argument("--origin-ibge-code", type=int)
+    parser.add_argument("--preview-path", type=Path)
+    parser.add_argument("--repetition-policy", choices=("allow", "reduce", "forbid"), default="allow")
     parser.add_argument(
         "--matrix-manifest",
         type=Path,
@@ -376,6 +396,25 @@ def _main() -> None:
         default=ROOT / "data/manifests/mtsp-benchmarks-mt.json",
     )
     args = parser.parse_args()
+    customized = any(
+        value is not None
+        for value in (args.objective, args.vehicle_count, args.origin_mode)
+    )
+    if customized:
+        if args.objective is None or args.vehicle_count is None or args.origin_mode is None:
+            parser.error("cenário personalizado exige objetivo, agentes e política de origem")
+        if args.origin_mode == "fixed" and args.origin_ibge_code is None:
+            parser.error("origem fixa exige --origin-ibge-code")
+        if args.origin_mode == "auto" and args.origin_ibge_code is not None:
+            parser.error("--origin-ibge-code só pode ser usado com --origin-mode fixed")
+        scenarios = _scenarios(
+            args.vehicle_count,
+            args.objective,
+            args.origin_mode,
+            args.origin_ibge_code,
+        )
+    else:
+        scenarios = SCENARIOS
     if not math.isfinite(args.time_limit_s) or args.time_limit_s <= 0:
         parser.error("--time-limit-s deve ser positivo")
     if not 0 <= args.seed <= 2**31 - 1:
@@ -386,7 +425,7 @@ def _main() -> None:
     matrix_manifest_path = args.matrix_manifest.resolve()
     graph_manifest_path = args.graph_manifest.resolve()
     output_path = args.output.resolve()
-    checkpoint_path = ROOT / "data/processed/mtsp-d5-checkpoint.json"
+    checkpoint_path = output_path.with_suffix(".checkpoint.json")
     if output_path.exists():
         raise FileExistsError(f"Relatório já existe; escolha --output: {output_path}")
 
@@ -406,6 +445,10 @@ def _main() -> None:
         ROOT / "backend/app/optimization/visitation/mtsp.py"
     )
     fingerprint = {
+        "repetition_policy": args.repetition_policy,
+        "repetition_algorithm_version": REPETITION_ALGORITHM_VERSION,
+        "repetition_algorithm_sha256": _sha256(ROOT / "backend/app/optimization/repetition.py"),
+        "repetition_runner_sha256": _sha256(Path(__file__).with_name("route_repetition.py")),
         "matrix_cache_key": matrix_manifest["cache_key"],
         "matrix_cache_sha256": matrix_sha256,
         "graph_sha256": graph_sha256,
@@ -413,9 +456,9 @@ def _main() -> None:
         "algorithm_source_sha256": algorithm_source_sha256,
         "time_limit_s_per_scenario": args.time_limit_s,
         "seed": args.seed,
-        "parallel_solver_processes": args.workers,
+        "parallel_solver_processes": min(args.workers, max(1, MEMORY_LIMIT // 2_000_000_000)),
         "multiprocessing_start_method": "spawn",
-        "scenario_ids": [scenario[0] for scenario in SCENARIOS],
+        "scenario_ids": [scenario[0] for scenario in scenarios],
     }
 
     results: list[dict[str, Any]] = []
@@ -428,7 +471,8 @@ def _main() -> None:
 
     print(
         f"Cache {matrix_path.stat().st_size:,} bytes e grafo {graph_path.stat().st_size:,} bytes; "
-        f"hashes validados. Até {args.workers} processos spawn sob teto de 25 GB.",
+        f"hashes validados. Até {min(args.workers, max(1, MEMORY_LIMIT // 2_000_000_000))} "
+        f"processos spawn sob limite de {MEMORY_LIMIT / 1_000_000_000:.2f} GB.",
         flush=True,
     )
     memory_peak_bytes = [_memory_current_bytes()]
@@ -463,18 +507,18 @@ def _main() -> None:
     }
     pending = [
         (position, scenario)
-        for position, scenario in enumerate(SCENARIOS, start=1)
+        for position, scenario in enumerate(scenarios, start=1)
         if scenario[0] not in completed
     ]
-    for position, scenario in enumerate(SCENARIOS, start=1):
+    for position, scenario in enumerate(scenarios, start=1):
         if scenario[0] in completed:
             print(
-                f"[{position}/{len(SCENARIOS)}] checkpoint: {scenario[0]} pronto.",
+                f"[{position}/{len(scenarios)}] checkpoint: {scenario[0]} pronto.",
                 flush=True,
             )
 
     with ProcessPoolExecutor(
-        max_workers=args.workers,
+        max_workers=min(args.workers, max(1, MEMORY_LIMIT // 2_000_000_000)),
         mp_context=multiprocessing.get_context("spawn"),
     ) as pool:
         futures = {
@@ -484,9 +528,10 @@ def _main() -> None:
                 scenario,
                 seats,
                 worker_matrices[scenario[2]],
-                args.time_limit_s,
+                args.time_limit_s * (0.75 if args.repetition_policy != "allow" else 1),
                 args.seed + position - 1,
-                len(SCENARIOS),
+                len(scenarios),
+                args.preview_path,
             ): scenario[0]
             for position, scenario in pending
         }
@@ -509,7 +554,7 @@ def _main() -> None:
             summary = ", ".join(f"{scenario}: {error}" for scenario, error in failures)
             raise RuntimeError(f"Falhas nos cenários D5: {summary}")
 
-    if completed != {scenario[0] for scenario in SCENARIOS}:
+    if completed != {scenario[0] for scenario in scenarios}:
         raise RuntimeError("Há cenários D5 ausentes no checkpoint")
 
     wanted_edge_ids = {
@@ -519,9 +564,23 @@ def _main() -> None:
         for leg in route["legs"]
         for edge_id in leg["edge_ids"]
     }
-    edge_metrics = _read_edge_metrics(graph_path, wanted_edge_ids)
+    physical_edges = load_physical_edges(
+        graph_path, matrices=matrices.values() if args.repetition_policy != "allow" else (),
+        selected_edge_ids=wanted_edge_ids,
+    )
     for item in results:
-        _finalize_scenario(item, seats, matrices[item["objective"]], edge_metrics)
+        apply_repetition_rule(item, seats, matrices[item["objective"]], physical_edges,
+                              policy=args.repetition_policy, time_limit_s=max(0.001, args.time_limit_s * 0.25),
+                              seed=item["seed"], preview_path=args.preview_path)
+        item["time_limit_s_per_scenario"] = args.time_limit_s
+    selected_edges = {e for item in results for route in item["routes"] for leg in route["legs"] for e in leg["edge_ids"]}
+    edge_metrics = {e: {"source": physical_edges[e].source_node, "target": physical_edges[e].target_node,
+                        "physical_segment_id": physical_edges[e].physical_segment_id,
+                        "length_m": physical_edges[e].length_m, "travel_time_s": physical_edges[e].travel_time_s}
+                    for e in selected_edges}
+    for item in results:
+        if item["status"] == "feasible":
+            _finalize_scenario(item, seats, matrices[item["objective"]], edge_metrics)
 
     memory_monitor_stop.set()
     memory_monitor.join()
@@ -539,7 +598,7 @@ def _main() -> None:
             "time_limit_s_per_scenario": args.time_limit_s,
             "variable_origin_time_budget_shared_across_candidates": True,
             "sequential_scenarios": False,
-            "parallel_solver_processes": args.workers,
+            "parallel_solver_processes": min(args.workers, max(1, MEMORY_LIMIT // 2_000_000_000)),
             "parallel_scenario_threads": 1,
             "multiprocessing_start_method": "spawn",
             "available_logical_cpus": os.cpu_count(),
@@ -555,7 +614,7 @@ def _main() -> None:
             "time-limited fixed-origin subproblems do not prove global optimality"
         ),
         "edge_metrics_source": "road-network-mt.jsonl.gz; selected edge IDs streamed without loading the full graph",
-        "validated_edge_id_count": len(wanted_edge_ids),
+        "validated_edge_id_count": len(selected_edges),
         "scenarios": sorted(results, key=lambda item: item["scenario"]),
     }
     _write_json(output_path, report)
@@ -571,6 +630,7 @@ def _run_scenario(
     time_limit_s: float,
     seed: int,
     scenario_count: int,
+    preview_path: Path | None = None,
 ) -> dict[str, Any]:
     scenario_id, vehicle_count, objective, origin_code = scenario
     print(
@@ -588,6 +648,29 @@ def _run_scenario(
             )
 
     started = perf_counter()
+    last_preview_at = 0.0
+
+    def preview(
+        routes: tuple[tuple[int, ...], ...], value: float, _origin_code: int
+    ) -> None:
+        nonlocal last_preview_at
+        now = perf_counter()
+        if preview_path is None or now - last_preview_at < 0.5:
+            return
+        last_preview_at = now
+        _write_json(
+            preview_path,
+            {
+                "scenario": scenario_id,
+                "objective_value": value,
+                "candidate_count": 1,
+                "routes": [
+                    {"agent_id": agent_id, "visit_order": list(order)}
+                    for agent_id, order in enumerate(routes, start=1)
+                ],
+            },
+        )
+
     solution = solve_open_mtsp(
         seats,
         matrix,
@@ -598,12 +681,28 @@ def _run_scenario(
         seed=seed,
         prove_small_instances=False,
         progress_callback=progress,
+        incumbent_callback=preview,
         include_edge_paths=False,
     )
+    if preview_path is not None and solution.routes:
+        _write_json(
+            preview_path,
+            {
+                "scenario": scenario_id,
+                "objective_value": solution.objective_value,
+                "candidate_count": 1,
+                "routes": [
+                    {"agent_id": route.agent_id, "visit_order": list(route.visit_order)}
+                    for route in solution.routes
+                ],
+            },
+        )
     item = _serialize_solution(solution, scenario_id, time_limit_s)
     item["wall_time_s"] = perf_counter() - started
     item["origin_policy"] = (
-        "fixed_cuiaba" if origin_code is not None else "optimized_among_all_seats"
+        "fixed_cuiaba" if origin_code == CUIABA_IBGE_CODE
+        else "fixed" if origin_code is not None
+        else "optimized_among_all_seats"
     )
     print(
         f"[{position}/{scenario_count}] {scenario_id}: {solution.status}, "
@@ -616,5 +715,4 @@ def _run_scenario(
 
 
 if __name__ == "__main__":
-    run_started = perf_counter()
     _main()

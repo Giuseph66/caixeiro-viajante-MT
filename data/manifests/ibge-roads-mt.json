@@ -1,0 +1,29 @@
+{
+  "dataset": "IBGE BC250 road segments clipped to Mato Grosso",
+  "created_at_utc": "2026-10-16T00:27:34.574365+00:00",
+  "source_url": "https://geoftp.ibge.gov.br/cartas_e_mapas/bases_cartograficas_continuas/bc250/versao2025/geopackage/bc250_gpkg_2026-03-03.zip",
+  "source_path": "data/raw/ibge/bc250/bc250_gpkg_2026-03-03.zip",
+  "source_sha256": "ff223482c743b81fff6b422378e6ada9406abedcff3f9768afb7cbef1da80781",
+  "source_layer": "rod_trecho_rodoviario_l",
+  "source_crs": "EPSG:4674",
+  "boundary_path": "frontend/public/mt-boundary.geojson",
+  "output_path": "frontend/public/ibge-rodovias-mt.geojson",
+  "output_sha256": "c3f9f287cb5da184eeb95fc4c6585a2e20f78677a0eaed4a38344315edc9499c",
+  "output_bytes": 2994128,
+  "segment_counts": {
+    "candidates": 11224,
+    "outside_state": 2139,
+    "kept": 9085,
+    "by_category": {
+      "estadual": 3363,
+      "outra": 4996,
+      "federal": 726
+    }
+  },
+  "simplification": {
+    "tolerance_degrees": 0.0004,
+    "coordinate_decimals": 4
+  },
+  "scope_note": "Visual background only; routes are computed on the OpenStreetMap graph.",
+  "license_note": "Public IBGE source file; the download index does not state a separate license."
+}

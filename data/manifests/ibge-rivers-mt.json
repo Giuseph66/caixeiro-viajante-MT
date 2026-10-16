@@ -1,0 +1,25 @@
+{
+  "dataset": "IBGE BC250 named watercourses clipped to Mato Grosso",
+  "created_at_utc": "2026-10-16T00:49:21.222063+00:00",
+  "source_url": "https://geoftp.ibge.gov.br/cartas_e_mapas/bases_cartograficas_continuas/bc250/versao2025/geopackage/bc250_gpkg_2026-03-03.zip",
+  "source_path": "data/raw/ibge/bc250/bc250_gpkg_2026-03-03.zip",
+  "source_sha256": "ff223482c743b81fff6b422378e6ada9406abedcff3f9768afb7cbef1da80781",
+  "source_layer": "hid_trecho_drenagem_l",
+  "source_crs": "EPSG:4674",
+  "boundary_path": "frontend/public/mt-boundary.geojson",
+  "output_path": "frontend/public/ibge-rios-mt.geojson",
+  "output_sha256": "c0aafd9ace51f40f6e61e418e56bf9768902a0ab9c76690d4cd313a66c06d19a",
+  "output_bytes": 5269414,
+  "counts": {
+    "candidates": 62898,
+    "outside_state": 22882,
+    "kept_segments": 40016,
+    "rivers": 2980
+  },
+  "simplification": {
+    "tolerance_degrees": 0.0008,
+    "coordinate_decimals": 4
+  },
+  "scope_note": "Visual layer only; unnamed watercourses are omitted.",
+  "license_note": "Public IBGE source file; the download index does not state a separate license."
+}

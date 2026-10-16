@@ -4,6 +4,8 @@ import math
 from dataclasses import dataclass
 from typing import Literal, Mapping, Sequence
 
+from app.optimization.repetition import RepetitionPolicy, repeated_distance, repetition_penalty
+
 OverlapPolicy = Literal["P1", "P2", "P3"]
 RoutingObjective = Literal["distance", "time"]
 OVERLAP_ALGORITHM_VERSION = "route-pool-overlap-v1"
@@ -56,6 +58,8 @@ class PolicyAssessment:
     penalty_value: float
     objective_value: float
     feasible: bool
+    repeated_distance_m: float = 0.0
+    repetition_penalty_value: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +134,7 @@ def assess_policy(
     policy: OverlapPolicy,
     penalty_lambda: float = 1.0,
     reference_speed_kph: float = 60.0,
+    repetition_policy: RepetitionPolicy = "allow",
 ) -> PolicyAssessment:
     _validate_policy_inputs(objective, policy, penalty_lambda, reference_speed_kph)
     if not routes:
@@ -138,6 +143,8 @@ def assess_policy(
         _validate_route(route)
 
     overlap = measure_overlap(routes, edge_metrics)
+    self_repeated = sum(repeated_distance(route.edge_ids, edge_metrics) for route in routes)
+    self_penalty = repetition_penalty(self_repeated, objective, repetition_policy)
     distance_total_m = sum(route.distance_m for route in routes)
     time_max_s = max(route.completion_time_s for route in routes)
     base_objective = distance_total_m if objective == "distance" else time_max_s
@@ -157,8 +164,11 @@ def assess_policy(
         base_objective=base_objective,
         overlap=overlap,
         penalty_value=penalty_value,
-        objective_value=base_objective + penalty_value,
-        feasible=policy != "P3" or overlap.shared_segment_count == 0,
+        objective_value=base_objective + penalty_value + self_penalty,
+        feasible=(policy != "P3" or overlap.shared_segment_count == 0)
+        and (repetition_policy != "forbid" or self_repeated <= 1e-6),
+        repeated_distance_m=self_repeated,
+        repetition_penalty_value=self_penalty,
     )
 
 
@@ -173,6 +183,7 @@ def solve_route_pool(
     penalty_lambda: float = 1.0,
     reference_speed_kph: float = 60.0,
     candidate_set_complete: bool = False,
+    repetition_policy: RepetitionPolicy = "allow",
 ) -> RoutePoolSolution:
     """Exhaustively select active routes that cover each required city once.
 
@@ -180,6 +191,7 @@ def solve_route_pool(
     Global road-network proof requires a complete candidate set.
     """
     _validate_policy_inputs(objective, policy, penalty_lambda, reference_speed_kph)
+    repetition_penalty(0, objective, repetition_policy)
     required = set(required_city_codes)
     agents = tuple(agent_ids)
     if not required or not agents or len(set(agents)) != len(agents):
@@ -191,6 +203,7 @@ def solve_route_pool(
     candidate_ids: set[str] = set()
     segment_lengths: dict[str, float] = {}
     candidate_segments: dict[str, frozenset[str]] = {}
+    candidate_repetition: dict[str, float] = {}
     for candidate in route_candidates:
         if candidate.agent_id not in grouped:
             raise ValueError(f"Agente desconhecido na rota {candidate.candidate_id!r}")
@@ -226,6 +239,10 @@ def solve_route_pool(
                 )
             segments.add(metric.physical_segment_id)
         candidate_segments[candidate.candidate_id] = frozenset(segments)
+        duplicate = repeated_distance(candidate.edge_ids, edge_metrics)
+        candidate_repetition[candidate.candidate_id] = duplicate
+        if repetition_policy == "forbid" and duplicate > 1e-6:
+            continue
         grouped[candidate.agent_id].append(candidate)
 
     if any(not grouped[agent_id] for agent_id in agents):
@@ -250,6 +267,7 @@ def solve_route_pool(
         distance_so_far: float,
         time_max_so_far: float,
         overlap_so_far: float,
+        repetition_so_far: float,
     ) -> None:
         nonlocal best_routes, best_objective_value, complete_combinations_examined
         if agent_index == len(agents):
@@ -266,7 +284,7 @@ def solve_route_pool(
                     * overlap_so_far
                     / (reference_speed_kph / 3.6)
                 )
-            objective_value = base_value + penalty_value
+            objective_value = base_value + penalty_value + repetition_penalty(repetition_so_far, objective, repetition_policy)
             tie_key = tuple(route.candidate_id for route in selected)
             best_tie_key = (
                 tuple(route.candidate_id for route in best_routes)
@@ -303,6 +321,7 @@ def solve_route_pool(
                 * overlap_so_far
                 / (reference_speed_kph / 3.6)
             )
+        lower_bound += repetition_penalty(repetition_so_far, objective, repetition_policy)
         if best_objective_value is not None and lower_bound > best_objective_value + 1e-9:
             return
 
@@ -329,6 +348,7 @@ def solve_route_pool(
                 distance_so_far + candidate.distance_m,
                 max(time_max_so_far, candidate.completion_time_s),
                 overlap_so_far + additional_overlap,
+                repetition_so_far + candidate_repetition[candidate.candidate_id],
             )
             for segment_id in segments:
                 remaining_count = used_segment_counts[segment_id] - 1
@@ -339,7 +359,7 @@ def solve_route_pool(
             served.difference_update(candidate_cities)
             selected.pop()
 
-    visit(0, 0.0, 0.0, 0.0)
+    visit(0, 0.0, 0.0, 0.0, 0.0)
     if best_routes is None:
         status = "infeasible_proven" if candidate_set_complete else "not_found"
         return RoutePoolSolution(
@@ -356,6 +376,7 @@ def solve_route_pool(
         policy=policy,
         penalty_lambda=penalty_lambda,
         reference_speed_kph=reference_speed_kph,
+        repetition_policy=repetition_policy,
     )
     return RoutePoolSolution(
         status="optimal_proven" if candidate_set_complete else "feasible",

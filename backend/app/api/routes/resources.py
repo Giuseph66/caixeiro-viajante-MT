@@ -10,6 +10,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.core.config import PROJECT_ROOT
+from app.core.memory_limit import (
+    MAX_MEMORY_BYTES,
+    MEMORY_BUDGET_RATIO,
+    MINIMUM_MEMORY_BUDGET_BYTES,
+    available_memory_bytes,
+    memory_budget_bytes,
+)
 from app.geography.municipalities import load_municipality_catalog
 from app.optimization.overlap import OVERLAP_ALGORITHM_VERSION
 from app.optimization.visitation.mtsp import MTSP_ALGORITHM_VERSION
@@ -26,6 +33,20 @@ DATASET_FILES = {
     "open-mtsp": ("Resultados open mTSP D5", "data/manifests/mtsp-benchmarks-mt.json"),
     "overlap": ("Resultados de sobreposição D6", "data/manifests/overlap-benchmarks-mt.json"),
 }
+
+
+@router.get("/resources/memory-budget", tags=["recursos"])
+def read_memory_budget() -> dict[str, Any]:
+    available = available_memory_bytes()
+    budget = memory_budget_bytes(available)
+    return {
+        "available_memory_bytes": available,
+        "budget_bytes": budget,
+        "hard_limit_bytes": MAX_MEMORY_BYTES,
+        "fraction_of_available": MEMORY_BUDGET_RATIO,
+        "minimum_budget_bytes": MINIMUM_MEMORY_BUDGET_BYTES,
+        "can_start": budget >= MINIMUM_MEMORY_BUDGET_BYTES,
+    }
 
 
 @router.get("/configurations", tags=["configurações"])

@@ -90,6 +90,29 @@ def test_exact_tsp_proves_fixed_and_variable_origin_orders() -> None:
     assert sorted(variable.visit_order) == [5100000, 5100001, 5100002]
 
 
+def test_exact_open_tsp_honors_fixed_destination() -> None:
+    seats = _seats(3)
+    matrix = _matrix(
+        [
+            [0, 2, 8],
+            [8, 0, 1],
+            [1, 8, 0],
+        ]
+    )
+
+    result = solve_open_tsp_exact(
+        seats,
+        matrix,
+        origin_ibge_code=5100000,
+        destination_ibge_code=5100002,
+        objective="distance",
+    )
+
+    assert result.status == "optimal_proven"
+    assert result.visit_order == (5100000, 5100001, 5100002)
+    assert result.candidates_evaluated == 1
+
+
 def test_time_objective_counts_service_once_and_zero_at_origin() -> None:
     seats = _seats(3)
     matrix = _matrix(

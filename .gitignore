@@ -14,6 +14,7 @@ backend/htmlcov/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+.playwright-mcp/
 
 # Local settings and generated datasets
 .env

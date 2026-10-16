@@ -1,12 +1,12 @@
 # Instalação nativa no Linux
 
-Guia de instalação e dados D1/D2, voltado a Debian/Kali Linux x86_64. Não usa contêineres. Os comandos com sudo abaixo são instruções para a pessoa administradora executar quando necessário; não foram executados pelo agente.
+Guia de instalação e dados D1/D2, voltado a Debian/Kali Linux x86_64. Backend e frontend rodam nativamente; PostgreSQL roda em container Docker Compose.
 
 ## Requisitos
 
 - Python 3.12 ou 3.13, venv e pip.
 - Node.js 22.12+ e npm. O workspace foi preparado com Node 24.12.0.
-- PostgreSQL para persistência. O grafo e as matrizes D3 são arquivos locais e não exigem PostGIS.
+- Docker Engine e Docker Compose para PostgreSQL. O grafo e as matrizes D3 são arquivos locais e não exigem PostGIS.
 
 O Vite requer Node 20.19+ ou 22.12+; Node 24.12.0 atende ao requisito atual. Confira avisos de versão do npm ao instalar. Referências: [Vite](https://vite.dev/guide/) e [OR-Tools Python](https://developers.google.com/optimization/install/).
 
@@ -89,39 +89,28 @@ O benchmark repete cálculos progressivos sobre o grafo regional. Custos de matr
 
 As restrições via nó são aplicadas. Via-ways, acessos/velocidades condicionais, barreiras e balsas não entram neste perfil inicial e ficam anotados no manifesto.
 
-## PostgreSQL e PostGIS
+## PostgreSQL em Docker Compose
 
-Inspecione primeiro as versões e clusters presentes:
+O `compose.yaml` usa a imagem oficial `postgres:17`, publica o banco apenas em `127.0.0.1:5433`, mantém os dados no volume `mt-routing-postgres-data` e limita o container a 1 GiB de RAM. A aplicação não usa PostGIS.
 
-    psql --version
-    pg_lsclusters
-    apt-cache search postgresql-postgis
-
-O host desta execução tinha cliente PostgreSQL 18.3 e servidores 17.6/18.3 instalados, porém nenhum cluster respondeu. Não instalar ou iniciar serviço automaticamente. Se o administrador precisar instalar PostgreSQL/PostGIS num sistema Debian/Kali, escolha o pacote PostGIS que corresponde à versão principal do servidor. A documentação oficial PostGIS para Debian indica o padrão postgresql-<versão>-postgis-3; consulte [instalação Debian/Ubuntu](https://postgis.net/documentation/getting_started/install_ubuntu/) e [PostgreSQL para Debian](https://www.postgresql.org/download/linux/debian/).
-
-Exemplo para PostgreSQL 18, caso essa versão seja a escolhida e os repositórios do sistema forneçam o pacote:
-
-    sudo apt install postgresql-18 postgresql-18-postgis-3
-
-Depois de instalar, o administrador pode iniciar o cluster pelo mecanismo de serviço da distribuição e criar usuário/banco locais:
-
-    sudo -u postgres createuser --pwprompt mt_routing
-    sudo -u postgres createdb --owner=mt_routing mt_routing
-
-Para habilitar PostGIS no banco de aplicação quando começar a ingestão geográfica:
-
-    psql -U mt_routing -d mt_routing -c "CREATE EXTENSION postgis;"
-    psql -U mt_routing -d mt_routing -c "SELECT postgis_full_version();"
-
-Não habilite PostGIS no banco de manutenção postgres. A migração inicial deste projeto não cria colunas espaciais nem requer a extensão.
-
-## Configurar aplicação e banco
-
-Na raiz:
+Na raiz do repositório, crie `.env` a partir do exemplo e defina uma senha local em `POSTGRES_PASSWORD`. Use a mesma senha em `DATABASE_URL`; o `.env` está ignorado pelo Git:
 
     cp .env.example .env
 
-Edite DATABASE_URL em .env com usuário, senha, host e banco locais. O arquivo .env é ignorado pelo Git. Não salve credenciais reais em .env.example.
+Inicie e verifique o banco:
+
+    docker compose up -d db
+    docker compose ps
+
+Parar o serviço preserva os dados. `docker compose down -v` remove também o volume e apaga o banco.
+
+## Configurar aplicação e banco
+
+Na raiz, crie o arquivo local de configuração:
+
+    cp .env.example .env
+
+Defina uma senha em `POSTGRES_PASSWORD` e use a mesma em `DATABASE_URL`, com host `127.0.0.1` e porta `5433`. O arquivo `.env` é ignorado pelo Git. Não salve credenciais reais em `.env.example`.
 
 Com o ambiente Python ativo:
 
@@ -140,7 +129,9 @@ Terminal 1:
 
     source .venv/bin/activate
     cd backend
-    uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+    python run_api.py --reload
+
+Esse lançador aplica à API o limite de 80% da memória disponível, com teto de 25 GB. Os cálculos também verificam a memória antes de iniciar.
 
 Terminal 2:
 
@@ -162,4 +153,4 @@ Resposta esperada:
     ruff check app tests alembic
     npm --prefix ../frontend run build
 
-Os resultados dependem do estado do ambiente e devem ser registrados por entrega. Nenhum serviço precisa de contêiner.
+Os resultados dependem do estado do ambiente e devem ser registrados por entrega. Somente o PostgreSQL roda em container; API, interface e cálculos rodam no host.

@@ -71,6 +71,9 @@ def solve_open_mtsp(
     prove_small_instances: bool = True,
     exact_city_limit: int = 8,
     progress_callback: Callable[[int, int, int], None] | None = None,
+    incumbent_callback: Callable[
+        [tuple[tuple[int, ...], ...], float, int], None
+    ] | None = None,
     include_edge_paths: bool = True,
 ) -> MtspSolution:
     """Solve an open mTSP with one common origin and every vehicle active."""
@@ -116,6 +119,26 @@ def solve_open_mtsp(
     best_baseline: tuple[float, tuple[tuple[int, ...], ...], int] | None = None
     best_ortools: tuple[float, tuple[tuple[int, ...], ...], int] | None = None
     solver_statuses: list[int] = []
+    best_reported_value = math.inf
+
+    def report_incumbent(
+        routes: tuple[tuple[int, ...], ...], origin_index: int
+    ) -> None:
+        nonlocal best_reported_value
+        if incumbent_callback is None:
+            return
+        value = _objective_value(routes, seats, matrix, objective, services)
+        if value is None or value >= best_reported_value:
+            return
+        best_reported_value = value
+        incumbent_callback(
+            tuple(
+                tuple(seats[index].ibge_code for index in route)
+                for route in routes
+            ),
+            value,
+            seats[origin_index].ibge_code,
+        )
 
     for candidate_number, origin_index in enumerate(candidate_origins, start=1):
         baseline_routes = _balanced_nearest_neighbor(
@@ -129,6 +152,7 @@ def solve_open_mtsp(
                 baseline_candidate = (baseline_value, baseline_routes, origin_index)
                 if _is_better(baseline_candidate, best_baseline, seats):
                     best_baseline = baseline_candidate
+                report_incumbent(baseline_routes, origin_index)
 
         ortools_routes, solver_status = _solve_with_ortools(
             seats,
@@ -140,6 +164,7 @@ def solve_open_mtsp(
             per_model_limit_s,
             seed,
             baseline_routes,
+            lambda routes: report_incumbent(routes, origin_index),
         )
         solver_statuses.append(solver_status)
         if progress_callback is not None:
@@ -437,6 +462,7 @@ def _solve_with_ortools(
     time_limit_s: float,
     seed: int,
     initial_routes: tuple[tuple[int, ...], ...] | None,
+    progress_callback: Callable[[tuple[tuple[int, ...], ...]], None] | None = None,
 ) -> tuple[tuple[tuple[int, ...], ...] | None, int]:
     size = len(seats)
     terminal_node = size
@@ -508,6 +534,21 @@ def _solve_with_ortools(
     )
     routing.solver().ReSeed(seed)
     assignment = None
+    if progress_callback is not None:
+        def on_solution() -> None:
+            routes: list[tuple[int, ...]] = []
+            for vehicle in range(vehicle_count):
+                route: list[int] = []
+                route_index = routing.Start(vehicle)
+                while not routing.IsEnd(route_index):
+                    node = manager.IndexToNode(route_index)
+                    if node < size:
+                        route.append(node)
+                    route_index = routing.NextVar(route_index).Value()
+                routes.append(tuple(route))
+            progress_callback(tuple(routes))
+
+        routing.AddAtSolutionCallback(on_solution)
     if initial_routes is not None:
         initial_assignment = routing.ReadAssignmentFromRoutes(
             [list(route[1:]) for route in initial_routes],

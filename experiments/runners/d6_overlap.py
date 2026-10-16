@@ -7,8 +7,10 @@ import json
 import math
 import multiprocessing
 import os
+import sqlite3
 import sys
 import threading
+import zlib
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -34,6 +36,9 @@ from app.optimization.visitation.mtsp import (  # noqa: E402
     solve_open_mtsp,
 )
 from app.routing.matrices import MetricMatrix, SeatSnap  # noqa: E402
+from app.geography.municipalities import EXPECTED_MUNICIPALITIES  # noqa: E402
+from app.optimization.repetition import REPETITION_ALGORITHM_VERSION, RepetitionPolicy, repeated_distance  # noqa: E402
+from route_repetition import apply_repetition_rule, load_physical_edges
 
 BASE_SEED = 20261008
 CUIABA_IBGE_CODE = 5103403
@@ -92,8 +97,8 @@ def _scenario_specs(
     output = []
     for item in sorted(scenarios, key=lambda scenario: scenario["scenario"]):
         origin = (
-            CUIABA_IBGE_CODE
-            if item["origin_policy"] == "fixed_cuiaba"
+            item.get("origin_ibge_code")
+            if item["origin_policy"] in ("fixed_cuiaba", "fixed")
             else None
         )
         output.append(
@@ -370,6 +375,7 @@ def _candidate_summary(
         "visit_order": route_info["visit_order"],
         "served_city_count": len(route.served_city_codes),
         "distance_m": route.distance_m,
+        "repeated_distance_m": repeated_distance(route.edge_ids, edge_metrics),
         "completion_time_s": route.completion_time_s,
         "edge_count": len(route.edge_ids),
         "edge_ids_sha256": digest,
@@ -399,6 +405,8 @@ def _pool_summary(
             "overlap_distance_m": assessment.overlap.redundant_distance_m,
             "shared_segment_count": assessment.overlap.shared_segment_count,
             "penalty_value": assessment.penalty_value,
+            "repetition_penalty_value": assessment.repetition_penalty_value,
+            "repeated_distance_m": assessment.repeated_distance_m,
             "objective_value": assessment.objective_value,
             "feasible": assessment.feasible,
             "shared_segments": [
@@ -420,6 +428,8 @@ def _build_scenario_report(
     edge_metrics: dict[str, PhysicalEdgeMetric],
     lambdas: tuple[float, ...],
     reference_speed_kph: float,
+    route_path_store: sqlite3.Connection,
+    repetition_policy: RepetitionPolicy = "allow",
 ) -> dict[str, Any]:
     seats_by_code = {seat.ibge_code: seat for seat in seats}
     required_all = set(seats_by_code)
@@ -468,6 +478,7 @@ def _build_scenario_report(
             "edge_metrics": edge_metrics,
             "objective": scenario["objective"],
             "candidate_set_complete": False,
+            "repetition_policy": repetition_policy,
         }
         p1_solution = solve_route_pool(
             candidates,
@@ -502,6 +513,28 @@ def _build_scenario_report(
             **policy_args,
         )
         p3_summary = _pool_summary(p3_solution, route_info, edge_metrics)
+
+        selected_candidate_ids = {
+            route["candidate_id"]
+            for summary in (p1_summary, *p2_summaries, p3_summary)
+            for route in summary.get("routes", [])
+        }
+        route_path_store.executemany(
+            "INSERT OR IGNORE INTO candidate_route_paths (candidate_id, edge_ids) "
+            "VALUES (?, ?)",
+            (
+                (
+                    candidate.candidate_id,
+                    zlib.compress(
+                        json.dumps(candidate.edge_ids, separators=(",", ":")).encode(
+                            "utf-8"
+                        )
+                    ),
+                )
+                for candidate in candidates
+                if candidate.candidate_id in selected_candidate_ids
+            ),
+        )
 
         d5_reference = None
         if len(d5_candidates) == vehicle_count:
@@ -566,6 +599,8 @@ def _build_scenario_report(
             "origin_ibge_code": origin,
             "objective_value": value,
             "overlap_distance_m": summary["overlap_distance_m"],
+            "repeated_distance_m": summary["repeated_distance_m"],
+            "repetition_penalty_value": summary["repetition_penalty_value"],
             "shared_segment_count": summary["shared_segment_count"],
             "candidate_ids": [route["candidate_id"] for route in summary["routes"]],
         }
@@ -574,6 +609,7 @@ def _build_scenario_report(
         "scenario": scenario["scenario"],
         "objective": scenario["objective"],
         "vehicle_count": scenario["vehicle_count"],
+        "repetition_policy": repetition_policy,
         "candidate_solution_count": len(solutions),
         "candidate_generation_wall_time_s": round(
             sum(float(solution.get("wall_time_s", 0.0)) for solution in solutions),
@@ -604,6 +640,8 @@ def _main() -> None:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=BASE_SEED)
     parser.add_argument("--lambdas", type=float, nargs="+", default=list(DEFAULT_LAMBDAS))
+    parser.add_argument("--preview-path", type=Path)
+    parser.add_argument("--repetition-policy", choices=("allow", "reduce", "forbid"), default="allow")
     parser.add_argument("--reference-speed-kph", type=float, default=60.0)
     parser.add_argument(
         "--matrix-manifest",
@@ -648,9 +686,13 @@ def _main() -> None:
     graph_manifest_path = args.graph_manifest.resolve()
     mtsp_report_path = args.mtsp_report.resolve()
     output_path = args.output.resolve()
-    checkpoint_path = ROOT / "data/processed/d6-overlap-checkpoint.json"
+    route_paths_path = output_path.with_suffix(".paths.sqlite")
+    route_paths_tmp_path = route_paths_path.with_name(route_paths_path.name + ".tmp")
+    checkpoint_path = output_path.with_suffix(".checkpoint.json")
     if output_path.exists():
         raise FileExistsError(f"Relatório D6 já existe; escolha --output: {output_path}")
+    route_paths_path.unlink(missing_ok=True)
+    route_paths_tmp_path.unlink(missing_ok=True)
 
     matrix_manifest = json.loads(matrix_manifest_path.read_text())
     graph_manifest = json.loads(graph_manifest_path.read_text())
@@ -673,11 +715,15 @@ def _main() -> None:
 
     scenarios = _scenario_specs(mtsp_report["scenarios"])
     scenario_by_id = {item[0]: item for item in scenarios}
-    if len(scenario_by_id) != 8:
-        raise ValueError("O relatório D5 deve conter os oito cenários mTSP")
+    if not scenario_by_id:
+        raise ValueError("O relatório D5 não contém cenários mTSP")
     algorithm_hash = _sha256(ROOT / "backend/app/optimization/visitation/mtsp.py")
     overlap_hash = _sha256(ROOT / "backend/app/optimization/overlap.py")
     fingerprint = {
+        "repetition_policy": args.repetition_policy,
+        "repetition_algorithm_version": REPETITION_ALGORITHM_VERSION,
+        "repetition_algorithm_sha256": _sha256(ROOT / "backend/app/optimization/repetition.py"),
+        "repetition_runner_sha256": _sha256(Path(__file__).with_name("route_repetition.py")),
         "matrix_cache_key": matrix_manifest["cache_key"],
         "matrix_cache_sha256": matrix_sha256,
         "graph_sha256": graph_sha256,
@@ -721,8 +767,9 @@ def _main() -> None:
                 )
 
     print(
-        f"D6: {len(pending)} buscas adicionais, até {args.workers} processos "
-        "spawn e teto cgroup de 25 GB.",
+        f"D6: {len(pending)} buscas adicionais, até "
+        f"{min(args.workers, max(1, MEMORY_LIMIT // 2_000_000_000))} processos "
+        f"spawn e limite cgroup de {MEMORY_LIMIT / 1_000_000_000:.2f} GB.",
         flush=True,
     )
     memory_peak_bytes = [_memory_current_bytes()]
@@ -734,14 +781,15 @@ def _main() -> None:
         daemon=True,
     )
     monitor.start()
+    route_path_store: sqlite3.Connection | None = None
     try:
         with gzip.open(matrix_path, "rt", encoding="utf-8") as source:
             payload = json.load(source)
         if payload.get("cache_key") != matrix_manifest["cache_key"]:
             raise ValueError("Chave do cache diverge do manifesto D3")
         seats = [SeatSnap(**item) for item in payload["municipalities"]]
-        if len(seats) != 142:
-            raise ValueError("A matriz precisa conter as 142 sedes de Mato Grosso")
+        if len(seats) != EXPECTED_MUNICIPALITIES:
+            raise ValueError(f"A matriz precisa conter as {EXPECTED_MUNICIPALITIES} sedes de Mato Grosso")
         matrices = {
             metric: MetricMatrix(
                 metric=metric,
@@ -791,7 +839,7 @@ def _main() -> None:
 
         if pending:
             with ProcessPoolExecutor(
-                max_workers=args.workers,
+                max_workers=min(args.workers, max(1, MEMORY_LIMIT // 2_000_000_000)),
                 mp_context=multiprocessing.get_context("spawn"),
             ) as pool:
                 futures = {
@@ -801,7 +849,7 @@ def _main() -> None:
                         scenario,
                         seats,
                         worker_matrices[scenario[2]],
-                        args.time_limit_s,
+                        args.time_limit_s * (0.75 if args.repetition_policy != "allow" else 1),
                         seed,
                         task_count,
                     ): scenario[0]
@@ -812,6 +860,22 @@ def _main() -> None:
                     spec = scenario_by_id[item["scenario"]]
                     _restore_paths(item, matrices[spec[2]], seats_by_code)
                     scenario_results[spec[0]].append(item)
+                    if args.preview_path is not None:
+                        _write_json(
+                            args.preview_path,
+                            {
+                                "scenario": item["scenario"],
+                                "objective_value": item["objective_value"],
+                                "candidate_count": len(scenario_results[spec[0]]),
+                                "routes": [
+                                    {
+                                        "agent_id": route["agent_id"],
+                                        "visit_order": route["visit_order"],
+                                    }
+                                    for route in item["routes"]
+                                ],
+                            },
+                        )
                     checkpoint_item = {
                         **item,
                         "routes": [
@@ -846,7 +910,22 @@ def _main() -> None:
             for leg in route["legs"]
             for edge_id in leg["edge_ids"]
         }
-        edge_metrics = _read_edge_metrics(graph_path, wanted_edge_ids)
+        edge_metrics = load_physical_edges(
+            graph_path, matrices=matrices.values(), selected_edge_ids=wanted_edge_ids,
+        ) if args.repetition_policy != "allow" else _read_edge_metrics(graph_path, wanted_edge_ids)
+        if args.repetition_policy != "allow":
+            for scenario_id, solutions in scenario_results.items():
+                base = next(item for item in mtsp_report["scenarios"] if item["scenario"] == scenario_id)
+                for solution in solutions:
+                    solution["origin_policy"] = base["origin_policy"]
+                    apply_repetition_rule(solution, seats, matrices[base["objective"]], edge_metrics,
+                                          policy=args.repetition_policy, time_limit_s=max(0.001, args.time_limit_s * 0.25),
+                                          seed=solution["seed"], keep_rejected_routes=True, preview_path=args.preview_path)
+        route_path_store = sqlite3.connect(route_paths_tmp_path)
+        route_path_store.execute(
+            "CREATE TABLE candidate_route_paths ("
+            "candidate_id TEXT PRIMARY KEY, edge_ids BLOB NOT NULL)"
+        )
         results = []
         for scenario_id, scenario_solutions in scenario_results.items():
             if len(scenario_solutions) != args.variants:
@@ -870,8 +949,11 @@ def _main() -> None:
                     edge_metrics,
                     tuple(args.lambdas),
                     args.reference_speed_kph,
+                    route_path_store,
+                    repetition_policy=args.repetition_policy,
                 )
             )
+            route_path_store.commit()
 
         memory_peak_bytes[0] = max(memory_peak_bytes[0], _memory_current_bytes())
         report = {
@@ -896,7 +978,7 @@ def _main() -> None:
             "configuration": {
                 "time_limit_s_per_variant": args.time_limit_s,
                 "variants_per_scenario_including_d5": args.variants,
-                "parallel_solver_processes": args.workers,
+                "parallel_solver_processes": min(args.workers, max(1, MEMORY_LIMIT // 2_000_000_000)),
                 "parallel_solver_threads_per_process": 1,
                 "multiprocessing_start_method": "spawn",
                 "available_logical_cpus": os.cpu_count(),
@@ -909,9 +991,15 @@ def _main() -> None:
             "scenarios": sorted(results, key=lambda item: item["scenario"]),
         }
         _write_json(output_path, report)
+        route_path_store.close()
+        route_path_store = None
+        route_paths_tmp_path.replace(route_paths_path)
         checkpoint_path.unlink(missing_ok=True)
         print(f"Relatório D6 auditado e gravado: {output_path}", flush=True)
     finally:
+        if route_path_store is not None:
+            route_path_store.close()
+        route_paths_tmp_path.unlink(missing_ok=True)
         monitor_stop.set()
         monitor.join()
 

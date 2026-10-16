@@ -21,15 +21,31 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.optimization.visitation.tsp import TSP_ALGORITHM_VERSION, solve_open_tsp
 from app.routing.matrices import MetricMatrix, SeatSnap
+from app.optimization.repetition import REPETITION_ALGORITHM_VERSION
+from route_repetition import apply_repetition_rule, load_physical_edges
 
 CUIABA_IBGE_CODE = 5103403
 BASE_SEED = 20261008
 SCENARIOS = (
-    ("O1-fixed-cuiaba-distance", "distance", CUIABA_IBGE_CODE),
-    ("O1-fixed-cuiaba-time", "time", CUIABA_IBGE_CODE),
-    ("O2-variable-origin-distance", "distance", None),
-    ("O2-variable-origin-time", "time", None),
+    ("O1-fixed-cuiaba-distance", "distance", CUIABA_IBGE_CODE, None),
+    ("O1-fixed-cuiaba-time", "time", CUIABA_IBGE_CODE, None),
+    ("O2-variable-origin-distance", "distance", None, None),
+    ("O2-variable-origin-time", "time", None, None),
 )
+
+
+def _configured_scenarios(args: argparse.Namespace) -> tuple[tuple[str, str, int | None, int | None], ...]:
+    if args.objective is None and args.origin_mode is None and args.destination_ibge_code is None:
+        return SCENARIOS
+    objective = args.objective or "distance"
+    origin = args.origin_ibge_code if args.origin_mode == "fixed" else None
+    origin_label = f"O1-fixed-{origin}" if origin is not None else "O2-variable-origin"
+    destination_label = (
+        f"-to-{args.destination_ibge_code}"
+        if args.destination_ibge_code is not None
+        else ""
+    )
+    return ((f"{origin_label}{destination_label}-{objective}", objective, origin, args.destination_ibge_code),)
 
 
 def _sha256(path: Path) -> str:
@@ -73,6 +89,13 @@ def _main() -> None:
     parser.add_argument("--time-limit-s", type=float, default=300.0)
     parser.add_argument("--seed", type=int, default=BASE_SEED)
     parser.add_argument("--verify-existing", action="store_true")
+    parser.add_argument("--objective", choices=("distance", "time"))
+    parser.add_argument("--origin-mode", choices=("auto", "fixed"))
+    parser.add_argument("--origin-ibge-code", type=int)
+    parser.add_argument("--destination-ibge-code", type=int)
+    parser.add_argument("--preview-path", type=Path)
+    parser.add_argument("--repetition-policy", choices=("allow", "reduce", "forbid"), default="allow")
+    parser.add_argument("--graph-manifest", type=Path, default=ROOT / "data/manifests/road-network-mt.json")
     parser.add_argument(
         "--cache-manifest",
         type=Path,
@@ -84,15 +107,29 @@ def _main() -> None:
         default=ROOT / "data/manifests/tsp-benchmarks-mt.json",
     )
     args = parser.parse_args()
+    scenarios = _configured_scenarios(args)
+    if args.origin_mode == "fixed" and args.origin_ibge_code is None:
+        parser.error("--origin-mode fixed exige --origin-ibge-code")
+    if args.origin_mode != "fixed" and args.origin_ibge_code is not None:
+        parser.error("--origin-ibge-code só pode ser usado com --origin-mode fixed")
+    if (
+        args.destination_ibge_code is not None
+        and args.origin_ibge_code == args.destination_ibge_code
+    ):
+        parser.error("origem e destino precisam ser diferentes")
     if not math.isfinite(args.time_limit_s) or args.time_limit_s <= 0:
         parser.error("--time-limit-s deve ser positivo")
-    if not 0 <= args.seed <= 2**31 - len(SCENARIOS):
+    if not 0 <= args.seed <= 2**31 - len(scenarios):
         parser.error("--seed deve permitir seeds de cenário entre 0 e 2^31-1")
     source_path = args.cache_manifest.resolve()
     output_path = args.output.resolve()
-    checkpoint_path = ROOT / "data/processed/tsp-d4-checkpoint.json"
+    checkpoint_path = output_path.with_suffix(".checkpoint.json")
     source_manifest = json.loads(source_path.read_text())
     matrix_path = (ROOT / source_manifest["cache_path"]).resolve()
+    graph_manifest = json.loads(args.graph_manifest.read_text())
+    graph_path = ROOT / graph_manifest["graph_path"]
+    if graph_manifest["graph_sha256"] != source_manifest["graph_sha256"] or _sha256(graph_path) != graph_manifest["graph_sha256"]:
+        raise ValueError("Grafo físico diverge da matriz D3")
     matrix_sha256 = _sha256(matrix_path)
     if matrix_sha256 != source_manifest["cache_sha256"]:
         raise ValueError("SHA-256 do cache D3 diverge do manifesto")
@@ -106,6 +143,11 @@ def _main() -> None:
         "algorithm_source_sha256": source_code_sha256,
         "time_limit_s_per_scenario": args.time_limit_s,
         "seed": args.seed,
+        "scenario_ids": [item[0] for item in scenarios],
+        "repetition_policy": args.repetition_policy,
+        "repetition_algorithm_version": REPETITION_ALGORITHM_VERSION,
+        "repetition_algorithm_sha256": _sha256(ROOT / "backend/app/optimization/repetition.py"),
+        "repetition_runner_sha256": _sha256(Path(__file__).with_name("route_repetition.py")),
     }
 
     existing_report = None
@@ -117,7 +159,7 @@ def _main() -> None:
         existing_report = json.loads(output_path.read_text())
         if (
             existing_report.get("fingerprint") != fingerprint
-            or len(existing_report.get("scenarios", [])) != len(SCENARIOS)
+            or len(existing_report.get("scenarios", [])) != len(scenarios)
         ):
             raise ValueError("Relatório existente diverge dos dados ou código atuais")
 
@@ -138,8 +180,6 @@ def _main() -> None:
     seats = [SeatSnap(**item) for item in payload["municipalities"]]
     if len(seats) != source_manifest["municipality_count"]:
         raise ValueError("Quantidade de sedes diverge do manifesto D3")
-    if CUIABA_IBGE_CODE not in {seat.ibge_code for seat in seats}:
-        raise ValueError("Cuiabá não está presente na matriz")
     matrices = {
         metric: MetricMatrix(
             metric=metric,
@@ -150,34 +190,60 @@ def _main() -> None:
         for metric in ("distance", "time")
     }
     if existing_report is not None:
-        existing_report["validation"] = _verify_report(existing_report, seats, matrices)
+        existing_report["validation"] = _verify_report(existing_report, seats, matrices, scenarios)
         _write_json(output_path, existing_report)
         print(f"Relatório validado contra matriz D3: {output_path}", flush=True)
         return
+    repetition_edges = load_physical_edges(graph_path, matrices=matrices.values()) if args.repetition_policy != "allow" else None
     print(
         f"Matriz pronta: {len(seats)} sedes; RSS pico {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.0f} MiB.",
         flush=True,
     )
 
-    for position, (scenario, metric, origin_code) in enumerate(SCENARIOS, start=1):
+    for position, (scenario, metric, origin_code, destination_code) in enumerate(scenarios, start=1):
         if scenario in completed:
-            print(f"[{position}/4] checkpoint: {scenario} já concluído.", flush=True)
+            print(f"[{position}/{len(scenarios)}] checkpoint: {scenario} já concluído.", flush=True)
             continue
         print(
-            f"[{position}/4] iniciando {scenario}; limite {args.time_limit_s:g}s.",
+            f"[{position}/{len(scenarios)}] iniciando {scenario}; limite {args.time_limit_s:g}s.",
             flush=True,
         )
         started = perf_counter()
         scenario_seed = args.seed + position - 1
+        last_preview_at = 0.0
+
+        def publish_candidate(
+            order: tuple[int, ...], value: float, *, force: bool = False
+        ) -> None:
+            nonlocal last_preview_at
+            if args.preview_path is not None:
+                now = perf_counter()
+                if not force and now - last_preview_at < 0.5:
+                    return
+                _write_json(
+                    args.preview_path,
+                    {
+                        "scenario": scenario,
+                        "objective_value": value,
+                        "candidate_count": 1,
+                        "routes": [{"agent_id": 1, "visit_order": list(order)}],
+                    },
+                )
+                last_preview_at = now
+
         solution = solve_open_tsp(
             seats,
             matrices[metric],
             origin_ibge_code=origin_code,
+            destination_ibge_code=destination_code,
             objective=metric,
-            time_limit_s=args.time_limit_s,
+            time_limit_s=args.time_limit_s * (0.75 if args.repetition_policy != "allow" else 1),
             prove_small_instances=False,
             seed=scenario_seed,
+            progress_callback=publish_candidate,
         )
+        if solution.objective_value is not None:
+            publish_candidate(solution.visit_order, solution.objective_value, force=True)
         distance_total_m, completion_time_s = _route_metrics(
             solution.visit_order,
             seats,
@@ -186,11 +252,24 @@ def _main() -> None:
         result = {
             "scenario": scenario,
             "seed": scenario_seed,
-            "origin_policy": "fixed_cuiaba" if origin_code is not None else "optimized_among_all_seats",
+            "origin_policy": (
+                "fixed_cuiaba" if origin_code == CUIABA_IBGE_CODE
+                else "fixed" if origin_code is not None
+                else "optimized_among_all_seats"
+            ),
             "status": solution.status,
             "method": solution.method,
             "origin_ibge_code": solution.origin_ibge_code,
+            "destination_ibge_code": destination_code,
             "visit_order": list(solution.visit_order),
+            "legs": [
+                {
+                    "from_ibge_code": leg.from_ibge_code,
+                    "to_ibge_code": leg.to_ibge_code,
+                    "edge_ids": list(leg.edge_ids),
+                }
+                for leg in solution.legs
+            ],
             "objective": solution.objective,
             "unit": solution.unit,
             "objective_value": solution.objective_value,
@@ -203,6 +282,7 @@ def _main() -> None:
             "runtime_s": solution.runtime_s,
             "wall_time_s": perf_counter() - started,
             "distance_total_m": distance_total_m,
+            "total_distance_m": distance_total_m,
             "distance_by_agent_m": [distance_total_m],
             "max_agent_distance_m": distance_total_m,
             "completion_time_s": completion_time_s,
@@ -214,6 +294,13 @@ def _main() -> None:
             "candidate_origins_evaluated": solution.candidates_evaluated,
             "solver_status_code": solution.solver_status,
         }
+        if result["visit_order"]:
+            physical_edges = repetition_edges if repetition_edges is not None else load_physical_edges(
+                graph_path, selected_edge_ids=(edge_id for leg in result["legs"] for edge_id in leg["edge_ids"]),
+            )
+            apply_repetition_rule(result, seats, matrices[metric], physical_edges, policy=args.repetition_policy,
+                                  time_limit_s=max(0.001, args.time_limit_s * 0.25), seed=scenario_seed,
+                                  preview_path=args.preview_path)
         results.append(result)
         completed.add(scenario)
         _write_json(
@@ -221,8 +308,8 @@ def _main() -> None:
             {"fingerprint": fingerprint, "scenarios": results},
         )
         print(
-            f"[{position}/4] {scenario}: {solution.status}, {solution.method}, "
-            f"{solution.objective_value:.3f} {solution.unit}, {solution.runtime_s:.1f}s.",
+            f"[{position}/{len(scenarios)}] {scenario}: {result['status']}, {result['method']}, "
+            f"objetivo {result['objective_value']} {solution.unit}, {result['runtime_s']:.1f}s.",
             flush=True,
         )
 
@@ -237,6 +324,7 @@ def _main() -> None:
         "configuration": {
             "time_limit_s_per_scenario": args.time_limit_s,
             "seed": args.seed,
+            "scenario_count": len(scenarios),
             "sequential_scenarios": True,
             "parallel_solver_processes": 1,
             "available_logical_cpus": os.cpu_count(),
@@ -256,14 +344,18 @@ def _verify_report(
     report: dict[str, Any],
     seats: list[SeatSnap],
     matrices: dict[str, MetricMatrix],
+    scenarios_to_check: tuple[tuple[str, str, int | None, int | None], ...] = SCENARIOS,
 ) -> dict[str, Any]:
     code_to_index = {seat.ibge_code: index for index, seat in enumerate(seats)}
     expected_codes = set(code_to_index)
     scenarios = {item["scenario"]: item for item in report["scenarios"]}
     checks = []
-    for scenario_name, metric, fixed_origin in SCENARIOS:
+    for scenario_name, metric, fixed_origin, fixed_destination in scenarios_to_check:
         scenario = scenarios[scenario_name]
         order = scenario["visit_order"]
+        if scenario["status"] == "not_found" and scenario.get("repetition_policy") == "forbid" and not order:
+            checks.append({"scenario": scenario_name, "no_violating_route_returned": True})
+            continue
         if (
             scenario["status"] != "feasible"
             or len(order) != len(seats)
@@ -271,6 +363,7 @@ def _verify_report(
             or set(order) != expected_codes
             or scenario["origin_ibge_code"] != order[0]
             or (fixed_origin is not None and order[0] != fixed_origin)
+            or (fixed_destination is not None and order[-1] != fixed_destination)
             or len(order) < 2
             or order[-1] == order[0]
         ):
@@ -294,7 +387,7 @@ def _verify_report(
             or not math.isclose(travel_cost, scenario["travel_cost"], rel_tol=1e-9, abs_tol=1e-6)
             or not math.isclose(
                 travel_cost,
-                scenario["objective_value"],
+                scenario.get("base_objective_value", scenario["objective_value"]),
                 rel_tol=1e-9,
                 abs_tol=1e-6,
             )
@@ -304,7 +397,7 @@ def _verify_report(
             scenario["heuristic_objective_value"],
             scenario["ortools_objective_value"],
         ):
-            if baseline_value is not None and scenario["objective_value"] > baseline_value + 1e-6:
+            if scenario.get("repetition_policy", "allow") == "allow" and baseline_value is not None and scenario["objective_value"] > baseline_value + 1e-6:
                 raise ValueError(f"Solução final pior que uma candidata em {scenario_name}")
         checks.append(
             {

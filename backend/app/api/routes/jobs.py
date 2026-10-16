@@ -6,12 +6,14 @@ from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_job_worker, get_session
 from app.core.config import PROJECT_ROOT
+from app.core.memory_limit import MINIMUM_MEMORY_BUDGET_BYTES, memory_budget_bytes
 from app.optimization.overlap import OVERLAP_ALGORITHM_VERSION
+from app.optimization.repetition import REPETITION_ALGORITHM_VERSION
 from app.optimization.visitation.mtsp import MTSP_ALGORITHM_VERSION
 from app.optimization.visitation.tsp import TSP_ALGORITHM_VERSION
 from app.persistence.models.experiment_run import ExperimentRun
@@ -19,6 +21,8 @@ from app.persistence.repositories.experiment_runs import create_run, get_run, li
 from app.schemas.api import JobCreateRequest, JobResponse
 from app.services.experiment_results import (
     build_geojson_file,
+    geojson_file_for_run,
+    preview_geojson_for_run,
     result_file_for_run,
     result_metrics,
     result_routes,
@@ -39,6 +43,17 @@ def create_job(
     session: Session = Depends(get_session),
     worker: Any = Depends(get_job_worker),
 ) -> JobResponse:
+    budget = memory_budget_bytes()
+    if budget < MINIMUM_MEMORY_BUDGET_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Memória livre insuficiente para iniciar o cálculo com segurança "
+                f"({budget / 1_000_000_000:.2f} GB disponíveis; "
+                f"mínimo de {MINIMUM_MEMORY_BUDGET_BYTES / 1_000_000_000:.0f} GB)."
+            ),
+        )
+
     fingerprint = _data_manifest_fingerprint()
     parameters = payload.model_dump(mode="json")
     run = create_run(
@@ -47,7 +62,8 @@ def create_job(
         parameters=parameters,
         data_manifest_sha256=fingerprint,
         seed=payload.seed,
-        algorithm_version=ALGORITHM_VERSIONS[payload.job_type],
+        algorithm_version=ALGORITHM_VERSIONS[payload.job_type]
+        + (f"+{REPETITION_ALGORITHM_VERSION}" if payload.repetition_policy != "allow" else ""),
     )
     session.commit()
     session.refresh(run)
@@ -83,6 +99,18 @@ def get_job(run_id: UUID, session: Session = Depends(get_session)) -> JobRespons
 def get_job_metrics(run_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
     run = _get_completed_run(session, run_id)
     return result_metrics(run)
+
+
+@router.get("/{run_id}/preview")
+def get_job_preview(run_id: UUID, session: Session = Depends(get_session)) -> JSONResponse:
+    run = get_run(session, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    try:
+        preview = preview_geojson_for_run(run, project_root=PROJECT_ROOT)
+    except FileNotFoundError:
+        preview = {"type": "FeatureCollection", "features": []}
+    return JSONResponse(content=preview, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/{run_id}/routes")
@@ -121,6 +149,11 @@ def get_job_geojson(
     session: Session = Depends(get_session),
 ) -> FileResponse:
     run = _get_completed_run(session, run_id)
+    cache_key = f"{scenario}:{policy}:{origin_ibge_code}:{lambda_value if policy == 'P2' else ''}"
+    cached_path = geojson_file_for_run(run, cache_key=cache_key, project_root=PROJECT_ROOT)
+    if cached_path.is_file():
+        return FileResponse(cached_path, media_type="application/geo+json")
+
     routes = result_routes(
         run,
         scenario=scenario,
@@ -128,7 +161,6 @@ def get_job_geojson(
         origin_ibge_code=origin_ibge_code,
         lambda_value=lambda_value,
     )
-    cache_key = f"{scenario}:{policy}:{origin_ibge_code}:{lambda_value if policy == 'P2' else ''}"
     output_path = build_geojson_file(
         run,
         routes,

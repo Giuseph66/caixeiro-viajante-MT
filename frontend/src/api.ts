@@ -1,5 +1,6 @@
 export type JobType = "tsp" | "mtsp" | "overlap";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "interrupted";
+export type RepetitionPolicy = "allow" | "reduce" | "forbid";
 
 export interface Municipality {
   ibge_code: number;
@@ -40,6 +41,9 @@ export interface ScenarioMetrics {
   objective_value?: number | null;
   total_distance_m?: number | null;
   time_max_s?: number | null;
+  repetition_policy?: RepetitionPolicy;
+  repeated_distance_m?: number | null;
+  repetition_penalty_value?: number | null;
   best_by_policy?: Record<string, unknown>;
   metrics_by_policy?: Record<string, unknown>;
 }
@@ -56,11 +60,26 @@ export interface ExperimentMetrics {
 
 export interface ExperimentRequest {
   job_type: JobType;
+  objective: "distance" | "time";
+  vehicle_count: number;
+  origin_ibge_code: number | null;
+  destination_ibge_code: number | null;
+  overlap_policy: "P1" | "P2" | "P3";
+  repetition_policy: RepetitionPolicy;
   time_limit_s: number;
   workers: number;
   variants: number;
   seed: number;
   lambdas: number[];
+}
+
+export interface MemoryBudget {
+  available_memory_bytes: number;
+  budget_bytes: number;
+  hard_limit_bytes: number;
+  fraction_of_available: number;
+  minimum_budget_bytes: number;
+  can_start: boolean;
 }
 
 const API_ROOT = import.meta.env.VITE_API_URL ?? "";
@@ -89,6 +108,10 @@ export function getConfigurations() {
   return request<Record<string, unknown>>("/api/experiments/configurations");
 }
 
+export function getMemoryBudget() {
+  return request<MemoryBudget>("/api/resources/memory-budget");
+}
+
 export function listExperiments() {
   return request<Experiment[]>("/api/experiments?limit=20");
 }
@@ -114,6 +137,10 @@ export function getGeojsonUrl(
   const query = new URLSearchParams({ scenario, policy });
   if (policy === "P2") query.set("lambda", String(lambdaValue));
   return `${API_ROOT}/api/experiments/${experimentId}/geojson?${query.toString()}`;
+}
+
+export function getPreviewUrl(experimentId: string, revision: number) {
+  return `${API_ROOT}/api/experiments/${experimentId}/preview?revision=${revision}`;
 }
 
 export function getExportUrl(experimentId: string) {

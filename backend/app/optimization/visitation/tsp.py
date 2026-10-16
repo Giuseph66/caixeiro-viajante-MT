@@ -4,7 +4,7 @@ import itertools
 import math
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Literal
+from typing import Callable, Literal
 
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
@@ -16,7 +16,7 @@ TspMethod = Literal["ortools", "nearest_neighbor", "exact", "none"]
 _COST_SCALE = 1_000_000
 _MAX_SCALED_ARC = 1 << 50
 _FORBIDDEN_ARC_COST = 1 << 60
-TSP_ALGORITHM_VERSION = "open-tsp-ortools-v1"
+TSP_ALGORITHM_VERSION = "open-tsp-ortools-v2-endpoint"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,16 +53,19 @@ def solve_open_tsp(
     matrix: MetricMatrix,
     *,
     origin_ibge_code: int | None,
+    destination_ibge_code: int | None = None,
     objective: TspObjective,
     service_times_s: dict[int, float] | None = None,
     time_limit_s: float = 60.0,
     prove_small_instances: bool = True,
     exact_city_limit: int = 9,
     seed: int | None = None,
+    progress_callback: Callable[[tuple[int, ...], float], None] | None = None,
 ) -> TspSolution:
-    """Solve an open, directed TSP; ``None`` origin lets the optimizer choose it."""
+    """Solve an open TSP with optional fixed first and last municipalities."""
     started = perf_counter()
     services = _validate_inputs(seats, matrix, objective, origin_ibge_code, service_times_s)
+    _validate_destination(seats, origin_ibge_code, destination_ibge_code)
     if not math.isfinite(time_limit_s) or time_limit_s <= 0:
         raise ValueError("O limite de tempo deve ser positivo e finito")
     if exact_city_limit < 1:
@@ -75,24 +78,50 @@ def solve_open_tsp(
             seats,
             matrix,
             origin_ibge_code=origin_ibge_code,
+            destination_ibge_code=destination_ibge_code,
             objective=objective,
             service_times_s=services,
             max_cities=exact_city_limit,
+            progress_callback=progress_callback,
         )
 
     code_to_index = {seat.ibge_code: index for index, seat in enumerate(seats)}
     fixed_start = (
         code_to_index[origin_ibge_code] if origin_ibge_code is not None else None
     )
+    fixed_end = (
+        code_to_index[destination_ibge_code]
+        if destination_ibge_code is not None
+        else None
+    )
     candidate_starts = (
         [fixed_start]
         if fixed_start is not None
-        else sorted(range(len(seats)), key=lambda index: seats[index].ibge_code)
+        else sorted(
+            (index for index in range(len(seats)) if index != fixed_end),
+            key=lambda index: seats[index].ibge_code,
+        )
     )
+
+    best_reported_value = math.inf
+
+    def report_incumbent(order: tuple[int, ...]) -> None:
+        nonlocal best_reported_value
+        if progress_callback is None:
+            return
+        value = _route_objective(order, seats, matrix, objective, services)
+        if value is not None and value < best_reported_value:
+            best_reported_value = value
+            progress_callback(tuple(seats[index].ibge_code for index in order), value)
+
     baseline_orders = [
         order
         for start_index in candidate_starts
-        if (order := _nearest_neighbor_order(seats, matrix, start_index))
+        if (
+            order := _nearest_neighbor_order(
+                seats, matrix, start_index, destination_index=fixed_end
+            )
+        )
         is not None
     ]
     baseline_order = min(
@@ -100,6 +129,8 @@ def solve_open_tsp(
         key=lambda order: (_route_objective(order, seats, matrix, objective, services), order),
         default=None,
     )
+    if baseline_order is not None:
+        report_incumbent(baseline_order)
 
     ortools_order, solver_status = _solve_with_ortools(
         seats,
@@ -107,8 +138,10 @@ def solve_open_tsp(
         objective,
         services,
         fixed_start,
+        fixed_end,
         time_limit_s,
         seed,
+        report_incumbent,
     )
     candidates = [order for order in (baseline_order, ortools_order) if order is not None]
     heuristic_value = (
@@ -170,27 +203,37 @@ def solve_open_tsp_exact(
     matrix: MetricMatrix,
     *,
     origin_ibge_code: int | None,
+    destination_ibge_code: int | None = None,
     objective: TspObjective,
     service_times_s: dict[int, float] | None = None,
     max_cities: int = 9,
+    progress_callback: Callable[[tuple[int, ...], float], None] | None = None,
 ) -> TspSolution:
     """Enumerate every open order and return an honest proof status."""
     started = perf_counter()
     services = _validate_inputs(seats, matrix, objective, origin_ibge_code, service_times_s)
+    _validate_destination(seats, origin_ibge_code, destination_ibge_code)
     if max_cities < 1 or len(seats) > max_cities:
         raise ValueError(f"Enumeração limitada a {max_cities} cidades")
 
     ordered_indices = sorted(range(len(seats)), key=lambda index: seats[index].ibge_code)
-    if origin_ibge_code is None:
-        orders = itertools.permutations(ordered_indices)
-    else:
-        start = next(
-            index for index in ordered_indices if seats[index].ibge_code == origin_ibge_code
+    start_indices = (
+        [next(index for index in ordered_indices if seats[index].ibge_code == origin_ibge_code)]
+        if origin_ibge_code is not None
+        else [index for index in ordered_indices if seats[index].ibge_code != destination_ibge_code]
+    )
+    end_index = (
+        next(index for index in ordered_indices if seats[index].ibge_code == destination_ibge_code)
+        if destination_ibge_code is not None
+        else None
+    )
+    orders = (
+        (start, *tail, *((end_index,) if end_index is not None else ()))
+        for start in start_indices
+        for tail in itertools.permutations(
+            index for index in ordered_indices if index not in (start, end_index)
         )
-        orders = (
-            (start, *tail)
-            for tail in itertools.permutations(index for index in ordered_indices if index != start)
-        )
+    )
 
     best_order: tuple[int, ...] | None = None
     best_value = math.inf
@@ -203,6 +246,10 @@ def solve_open_tsp_exact(
         if value < best_value:
             best_order = order
             best_value = value
+            if progress_callback is not None:
+                progress_callback(
+                    tuple(seats[index].ibge_code for index in order), value
+                )
 
     if best_order is None:
         return TspSolution(
@@ -300,8 +347,10 @@ def _solve_with_ortools(
     objective: TspObjective,
     service_times_s: dict[int, float],
     fixed_start: int | None,
+    fixed_end: int | None,
     time_limit_s: float,
     seed: int | None,
+    progress_callback: Callable[[tuple[int, ...]], None] | None = None,
 ) -> tuple[tuple[int, ...] | None, int]:
     size = len(seats)
     source_node = size if fixed_start is None else fixed_start
@@ -343,6 +392,25 @@ def _solve_with_ortools(
             if to_routing_index >= 0:
                 routing.NextVar(from_routing_index).RemoveValue(to_routing_index)
 
+    if fixed_end is not None:
+        end_routing_index = routing.End(0)
+        for city in range(size):
+            from_routing_index = (
+                routing.Start(0)
+                if fixed_start == city
+                else manager.NodeToIndex(city)
+            )
+            if city != fixed_end:
+                routing.NextVar(from_routing_index).RemoveValue(end_routing_index)
+            elif from_routing_index >= 0:
+                for other_city in range(size):
+                    if other_city != fixed_end:
+                        other_index = manager.NodeToIndex(other_city)
+                        if other_index >= 0:
+                            routing.NextVar(from_routing_index).RemoveValue(other_index)
+        if fixed_start is None:
+            routing.NextVar(routing.Start(0)).RemoveValue(manager.NodeToIndex(fixed_end))
+
     parameters = pywrapcp.DefaultRoutingSearchParameters()
     parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     parameters.local_search_metaheuristic = (
@@ -353,6 +421,19 @@ def _solve_with_ortools(
     parameters.time_limit.nanos = int((time_limit_s - whole_seconds) * 1_000_000_000)
     if seed is not None:
         routing.solver().ReSeed(seed)
+
+    if progress_callback is not None:
+        def on_solution() -> None:
+            order: list[int] = []
+            index = routing.Start(0)
+            while not routing.IsEnd(index):
+                node = manager.IndexToNode(index)
+                if node < size:
+                    order.append(node)
+                index = routing.NextVar(index).Value()
+            progress_callback(tuple(order))
+
+        routing.AddAtSolutionCallback(on_solution)
     solution = routing.SolveWithParameters(parameters)
     status = int(routing.status())
     if solution is None:
@@ -374,9 +455,11 @@ def _nearest_neighbor_order(
     seats: list[SeatSnap],
     matrix: MetricMatrix,
     start: int,
+    *,
+    destination_index: int | None = None,
 ) -> tuple[int, ...] | None:
     order = [start]
-    remaining = set(range(len(seats))) - {start}
+    remaining = set(range(len(seats))) - {start, destination_index}
     while remaining:
         current = order[-1]
         reachable = [
@@ -395,7 +478,25 @@ def _nearest_neighbor_order(
         )
         order.append(next_city)
         remaining.remove(next_city)
+    if destination_index is not None:
+        if matrix.costs[order[-1]][destination_index] is None:
+            return None
+        order.append(destination_index)
     return tuple(order)
+
+
+def _validate_destination(
+    seats: list[SeatSnap],
+    origin_ibge_code: int | None,
+    destination_ibge_code: int | None,
+) -> None:
+    if destination_ibge_code is None:
+        return
+    known_codes = {seat.ibge_code for seat in seats}
+    if destination_ibge_code not in known_codes:
+        raise ValueError("Destino não está presente na matriz de municípios")
+    if destination_ibge_code == origin_ibge_code:
+        raise ValueError("Origem e destino precisam ser municípios diferentes")
 
 
 def _route_objective(

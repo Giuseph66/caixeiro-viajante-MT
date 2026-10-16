@@ -135,14 +135,24 @@ class LocalExperimentWorker:
             session.commit()
 
         output_path = self._project_root / "data/processed/jobs" / f"{run_id}.json"
+        preview_path = output_path.with_suffix(".preview.json")
+        route_paths_path = output_path.with_suffix(".paths.sqlite")
+        route_paths_tmp_path = route_paths_path.with_name(route_paths_path.name + ".tmp")
+        preview_path.unlink(missing_ok=True)
+        route_paths_path.unlink(missing_ok=True)
+        route_paths_tmp_path.unlink(missing_ok=True)
         environment = os.environ.copy()
         environment["PYTHONUNBUFFERED"] = "1"
         logs: list[str] = []
         last_persisted = 0.0
         last_progress = 1
         process: subprocess.Popen[str] | None = None
+        preserve_preview = False
+        preserve_route_paths = False
         try:
             command = self._build_command(job_type, parameters, output_path)
+            if job_type in ("tsp", "mtsp", "overlap"):
+                command.extend(("--preview-path", str(preview_path)))
             process = subprocess.Popen(
                 command,
                 cwd=self._project_root,
@@ -166,13 +176,24 @@ class LocalExperimentWorker:
 
             if process.stdout is None:
                 raise RuntimeError("Não foi possível capturar a saída do runner")
+            overlap_phase_two = False
             for line in process.stdout:
                 line = line.rstrip()
                 if not line:
                     continue
+                if job_type == "overlap" and line.startswith("D6:"):
+                    overlap_phase_two = True
                 logs.append(line)
                 logs = logs[-80:]
-                progress = self._progress_from_line(line, last_progress)
+                if job_type == "overlap":
+                    progress = self._progress_from_line(
+                        line,
+                        last_progress,
+                        progress_start=45 if overlap_phase_two else 1,
+                        progress_span=50 if overlap_phase_two else 44,
+                    )
+                else:
+                    progress = self._progress_from_line(line, last_progress)
                 now = datetime.now(UTC).timestamp()
                 if progress != last_progress or now - last_persisted >= 1.0:
                     self._persist_progress(run_id, progress, line, logs)
@@ -201,8 +222,24 @@ class LocalExperimentWorker:
                     result_path=str(output_path.relative_to(self._project_root)),
                     result_summary=summary,
                 )
+                preserve_preview = preview_path.is_file()
+                preserve_route_paths = job_type == "overlap" and route_paths_path.is_file()
             else:
-                error = f"Runner terminou com código {return_code}"
+                error = next(
+                    (
+                        line.strip()
+                        for line in reversed(logs)
+                        if any(
+                            message in line
+                            for message in (
+                                "Memória livre insuficiente",
+                                "systemd-run indisponível",
+                                "systemd não aplicou o teto",
+                            )
+                        )
+                    ),
+                    f"Runner terminou com código {return_code}",
+                )
                 self._finish(
                     run_id,
                     status="failed",
@@ -222,6 +259,29 @@ class LocalExperimentWorker:
                 error_summary=str(error)[:2_000],
             )
         finally:
+            checkpoint_path = output_path.with_suffix(".checkpoint.json")
+            base_report_path = output_path.with_name(f"{output_path.stem}.d5-base.json")
+            base_checkpoint_path = base_report_path.with_suffix(".checkpoint.json")
+            temporary_paths = (
+                preview_path.with_name(preview_path.name + ".tmp"),
+                output_path.with_name(output_path.name + ".tmp"),
+                checkpoint_path,
+                checkpoint_path.with_name(checkpoint_path.name + ".tmp"),
+                base_report_path,
+                base_report_path.with_name(base_report_path.name + ".tmp"),
+                base_checkpoint_path,
+                base_checkpoint_path.with_name(base_checkpoint_path.name + ".tmp"),
+            )
+            if not preserve_preview:
+                temporary_paths = (preview_path, *temporary_paths)
+            if not preserve_route_paths:
+                temporary_paths = (
+                    route_paths_path,
+                    route_paths_tmp_path,
+                    *temporary_paths,
+                )
+            for temporary_path in temporary_paths:
+                temporary_path.unlink(missing_ok=True)
             if process is not None:
                 with self._lock:
                     self._processes.pop(run_id, None)
@@ -236,7 +296,7 @@ class LocalExperimentWorker:
         scripts = {
             "tsp": "d4_open_tsp.py",
             "mtsp": "d5_open_mtsp.py",
-            "overlap": "d6_overlap.py",
+            "overlap": "d6_custom.py",
         }
         try:
             script = scripts[job_type]
@@ -250,13 +310,45 @@ class LocalExperimentWorker:
             "--output",
             str(output_path),
         ]
+        command.extend(("--repetition-policy", str(parameters.get("repetition_policy", "allow"))))
         if job_type in ("mtsp", "overlap"):
             command.extend(
                 ("--workers", str(parameters["workers"]), "--seed", str(parameters["seed"]))
             )
+        if job_type == "tsp":
+            command.extend(("--seed", str(parameters.get("seed", 20261008))))
+            command.extend(
+                (
+                    "--objective", str(parameters.get("objective", "distance")),
+                    "--origin-mode", "fixed" if parameters.get("origin_ibge_code") else "auto",
+                )
+            )
+            if parameters.get("origin_ibge_code") is not None:
+                command.extend(("--origin-ibge-code", str(parameters["origin_ibge_code"])))
+            if parameters.get("destination_ibge_code") is not None:
+                command.extend(("--destination-ibge-code", str(parameters["destination_ibge_code"])))
+        if job_type == "mtsp":
+            command.extend(
+                (
+                    "--objective", str(parameters.get("objective", "distance")),
+                    "--vehicle-count", str(parameters.get("vehicle_count", 2)),
+                    "--origin-mode", "fixed" if parameters.get("origin_ibge_code") else "auto",
+                )
+            )
+            if parameters.get("origin_ibge_code") is not None:
+                command.extend(("--origin-ibge-code", str(parameters["origin_ibge_code"])))
         if job_type == "overlap":
             command.extend(("--variants", str(parameters["variants"])))
             command.extend(("--lambdas", *(str(value) for value in parameters["lambdas"])))
+            command.extend(
+                (
+                    "--objective", str(parameters.get("objective", "distance")),
+                    "--vehicle-count", str(parameters.get("vehicle_count", 2)),
+                    "--origin-mode", "fixed" if parameters.get("origin_ibge_code") else "auto",
+                )
+            )
+            if parameters.get("origin_ibge_code") is not None:
+                command.extend(("--origin-ibge-code", str(parameters["origin_ibge_code"])))
         return command
 
     def _persist_progress(
@@ -303,14 +395,20 @@ class LocalExperimentWorker:
             session.commit()
 
     @staticmethod
-    def _progress_from_line(line: str, current: int) -> int:
+    def _progress_from_line(
+        line: str,
+        current: int,
+        *,
+        progress_start: int = 5,
+        progress_span: int = 90,
+    ) -> int:
         match = PROGRESS_PATTERN.search(line)
         if match is None:
             return current
         completed, total = int(match.group(1)), int(match.group(2))
         if total <= 0:
             return current
-        return max(current, min(95, 5 + int(90 * completed / total)))
+        return max(current, min(95, progress_start + int(progress_span * completed / total)))
 
     @staticmethod
     def _read_result_summary(path: Path) -> dict[str, Any]:
